@@ -1,0 +1,44 @@
+Metadata-Version: 2.4
+Name: moomoo-bot
+Version: 0.1.0
+Summary: CLI trading bot prototype for Moomoo US paper trading and strategy research
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: moomoo-api
+Requires-Dist: numpy<3.0,>=1.26
+Requires-Dist: pandas<3.0,>=2.2
+Requires-Dist: pydantic<3.0,>=2.7
+Requires-Dist: pydantic-settings<3.0,>=2.3
+Requires-Dist: rich<14.0,>=13.7
+Requires-Dist: typer<1.0,>=0.12
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.2; extra == "dev"
+Requires-Dist: pytest-cov<6.0,>=5.0; extra == "dev"
+
+# moomoo-bot
+
+CUI-first trading bot prototype for Moomoo US stocks and ETFs.
+
+The initial version is paper-trading-first and includes a strategy research/backtest path. Live trading is treated as an explicit opt-in later.
+
+## Setup
+
+```bash
+python -m pip install -e .[dev]
+```
+
+## Commands
+
+```bash
+moomoo-bot --help
+moomoo-bot status
+moomoo-bot run --mode paper
+moomoo-bot backtest --symbols US.AAPL,US.MSFT,US.NVDA --benchmark US.VT
+pytest
+```
+
+## Notes
+
+- Moomoo OpenD is required.
+- Strategy outperformance against ACWI/VT is a research goal, not a guarantee.
+- Secrets must stay in environment variables.
