@@ -1,3 +1,9 @@
+"""Strategy base module.
+
+Purpose: Define Strategy protocol and TradeDecision.
+Related: strategy/__init__.py, backtest/engine.py.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,4 +22,3 @@ class TradeDecision:
 class Strategy(Protocol):
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         """Return the target portfolio weights for the next rebalance."""
-

@@ -93,6 +93,48 @@ def test_live_trade_uses_real_trade_environment_when_armed(monkeypatch) -> None:
     assert trade_client.submit_order_calls >= 1
 
 
+def test_paper_trade_skips_duplicate_active_orders(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=102_000.0,
+    )
+    quote_client = FakeLiveQuoteClient()
+    trade_client = FakeTradeClient(
+        matching_active_orders=[
+            {
+                "order_id": "DUP-1",
+                "order_status": "SUBMITTED",
+                "code": "US.AAPL",
+                "trd_side": "BUY",
+                "qty": 980.392,
+                "price": 102.0,
+                "session": "N/A",
+                "fill_outside_rth": False,
+                "remark": "live-test",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "MoomooOpenDClient", lambda *args, **kwargs: quote_client)
+    monkeypatch.setattr(cli, "MoomooPaperTradeClient", lambda *args, **kwargs: trade_client)
+    monkeypatch.setattr(cli, "_build_monthly_strategy", lambda settings: FakeLiveStrategy())
+
+    cli.paper_trade(
+        symbols=None,
+        benchmark_symbol=None,
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+    )
+
+    assert trade_client.submit_order_calls == 0
+
+
 @dataclass
 class FakeQuoteClient:
     fetch_price_panel_calls: int = 0
@@ -123,12 +165,28 @@ class FakeQuoteClient:
 @dataclass
 class FakeTradeClient:
     submit_order_calls: int = 0
+    matching_active_orders: list[dict[str, object]] | None = None
+    account_value: float = 100_000.0
 
     def get_position_frame(self):
         return pd.DataFrame({"code": [], "qty": []})
 
     def get_account_value(self):
-        return 100_000.0
+        return self.account_value
+
+    def get_matching_active_order(self, instruction, refresh_cache=True):
+        for order in self.matching_active_orders or []:
+            if (
+                order.get("code") == instruction.symbol
+                and str(order.get("trd_side", "")).upper() == str(instruction.side).upper()
+                and float(order.get("qty", 0.0) or 0.0) == float(instruction.quantity)
+                and float(order.get("price", 0.0) or 0.0) == float(instruction.price)
+                and str(order.get("session", "")).upper() == str(instruction.session).upper()
+                and bool(order.get("fill_outside_rth", False)) == bool(instruction.fill_outside_rth)
+                and str(order.get("remark", "")) == str(instruction.reason)
+            ):
+                return order
+        return None
 
     def submit_order(self, instruction):
         self.submit_order_calls += 1

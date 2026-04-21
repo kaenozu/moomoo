@@ -146,9 +146,6 @@ class FakeQuoteContext:
     def get_market_state(self, code_list):
         return RET_OK, pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
 
-    def get_market_state(self, code_list):
-        return RET_OK, pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
-
     def close(self) -> None:
         self.closed = True
 

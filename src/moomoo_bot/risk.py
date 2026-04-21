@@ -1,3 +1,9 @@
+"""Risk management module.
+
+Purpose: Handle risk detection, stop-loss, take-profit, and position liquidation.
+Related: cli.py, paper.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -6,15 +12,7 @@ from dataclasses import dataclass
 import pandas as pd
 from moomoo import Session, TrdSide
 
-from moomoo_bot.paper import PaperOrderInstruction
-
-
-@dataclass(frozen=True)
-class RiskSettings:
-    max_drawdown_pct: float = 0.15
-    market_shock_drop_pct: float = 0.05
-    stop_loss_pct: float = 0.10
-    take_profit_pct: float = 0.20
+from moomoo_bot.paper import PaperOrderInstruction, normalize_order_quantity
 
 
 @dataclass
@@ -46,7 +44,9 @@ def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | N
     return None
 
 
-def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_pct: float) -> str | None:
+def update_drawdown_state(
+    account_value: float, state: RiskState, max_drawdown_pct: float
+) -> str | None:
     if account_value <= 0.0:
         account_value = 0.0
 
@@ -78,7 +78,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = round(float(quantity), 3)
+        sell_qty = normalize_order_quantity(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -114,11 +114,18 @@ def build_stop_loss_take_profit_orders(
         if not symbol or symbol not in latest_prices:
             continue
 
-        quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
+        quantity = _extract_float(
+            row, ("qty", "position_qty", "holding_qty", "can_use_qty")
+        )
         if quantity is None or quantity <= 0.0:
             continue
+        quantity = normalize_order_quantity(quantity)
+        if quantity <= 0.0:
+            continue
 
-        basis = _extract_float(row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost"))
+        basis = _extract_float(
+            row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost")
+        )
         if basis is None or basis <= 0.0:
             continue
 
@@ -128,7 +135,7 @@ def build_stop_loss_take_profit_orders(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=round(quantity, 3),
+                    quantity=quantity,
                     price=latest_price,
                     reason=f"risk:stop_loss:{symbol}:{latest_price:.2f}<={basis:.2f}",
                     session=session,
@@ -142,7 +149,7 @@ def build_stop_loss_take_profit_orders(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=round(quantity, 3),
+                    quantity=quantity,
                     price=latest_price,
                     reason=f"risk:take_profit:{symbol}:{latest_price:.2f}>={basis:.2f}",
                     session=session,

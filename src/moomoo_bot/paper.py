@@ -1,3 +1,9 @@
+"""Paper trading allocation and order instruction module.
+
+Purpose: Build paper trade plan and convert decisions to order instructions.
+Related: cli.py, strategy modules.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,11 +62,13 @@ def build_paper_plan(
     if not 0.0 < max_position_weight <= 1.0:
         raise ValueError("max_position_weight must be between 0 and 1")
 
-    latest_prices = prices.loc[:decision.as_of].iloc[-1]
+    latest_prices = prices.loc[: decision.as_of].iloc[-1]
     allocations: list[PaperAllocation] = []
     allocated_cost = 0.0
 
-    for symbol, weight in sorted(decision.target_weights.items(), key=lambda item: (-item[1], item[0])):
+    for symbol, weight in sorted(
+        decision.target_weights.items(), key=lambda item: (-item[1], item[0])
+    ):
         if symbol not in latest_prices.index:
             raise ValueError(f"missing latest price for {symbol}")
 
@@ -105,12 +113,14 @@ def build_paper_rebalance_orders(
 ) -> list[PaperOrderInstruction]:
     positions = current_positions or {}
     prices = latest_prices or {}
-    target_by_symbol = {allocation.symbol: allocation for allocation in plan.allocations}
+    target_by_symbol = {
+        allocation.symbol: allocation for allocation in plan.allocations
+    }
     instructions: list[PaperOrderInstruction] = []
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = round(allocation.target_quantity - current_qty, 3)
+        delta = normalize_order_quantity(allocation.target_quantity - current_qty)
         if delta > 0.0:
             instructions.append(
                 PaperOrderInstruction(
@@ -139,10 +149,12 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = round(float(current_qty), 3)
+        sell_qty = normalize_order_quantity(float(current_qty))
         if sell_qty > 0.0:
             if symbol not in prices:
-                raise ValueError(f"missing latest price for liquidation symbol {symbol}")
+                raise ValueError(
+                    f"missing latest price for liquidation symbol {symbol}"
+                )
             instructions.append(
                 PaperOrderInstruction(
                     symbol=symbol,
@@ -163,3 +175,8 @@ def build_paper_rebalance_orders(
             instruction.symbol,
         ),
     )
+
+
+def normalize_order_quantity(quantity: float) -> float:
+    rounded = round(float(quantity), 3)
+    return rounded if rounded != 0.0 else 0.0

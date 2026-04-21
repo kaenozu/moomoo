@@ -1,7 +1,15 @@
+"""Currency conversion module.
+
+Purpose: Convert capital between JPY and USD.
+Related: cli.py, config.py.
+"""
+
 from __future__ import annotations
 
 
-def convert_capital_to_usd(amount: float, currency: str, fx_jpy_per_usd: float) -> float:
+def convert_capital_to_usd(
+    amount: float, currency: str, fx_jpy_per_usd: float
+) -> float:
     if amount <= 0.0:
         raise ValueError("capital must be positive")
     if fx_jpy_per_usd <= 0.0:
