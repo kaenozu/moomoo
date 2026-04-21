@@ -352,43 +352,6 @@ def satellite(
 
 
 @app.command()
-def paper_run(
-    symbols: str | None = typer.Option(
-        None, help="Comma-separated US symbols to trade."
-    ),
-    benchmark_symbol: str | None = typer.Option(
-        None, help="Benchmark symbol used for market data alignment."
-    ),
-    history_days: int = typer.Option(
-        2200, min=60, help="Calendar lookback window for historical data."
-    ),
-    capital: float | None = typer.Option(
-        None,
-        min=5.0,
-        help="Paper trading capital used to size allocations (JPY by default).",
-    ),
-    fx_jpy_per_usd: float | None = typer.Option(
-        None, min=0.01, help="JPY per USD used to convert paper capital for sizing."
-    ),
-    minimum_order_value: float = typer.Option(
-        5.0, min=0.0, help="Minimum order value used for fractional sizing."
-    ),
-) -> None:
-    settings = get_settings()
-    _require_paper_mode(settings, "paper-run")
-    _run_one_shot_trade(
-        settings=settings,
-        trade_env=TrdEnv.SIMULATE,
-        symbols=symbols,
-        benchmark_symbol=benchmark_symbol,
-        history_days=history_days,
-        capital=capital,
-        fx_jpy_per_usd=fx_jpy_per_usd,
-        minimum_order_value=minimum_order_value,
-    )
-
-
-@app.command()
 def paper_trade(
     symbols: str | None = typer.Option(
         None, help="Comma-separated US symbols to trade."
@@ -527,7 +490,11 @@ def _run_one_shot_trade(
         )
         if drawdown_reason:
             liquidation_orders = build_liquidation_orders(
-                current_positions, latest_prices, drawdown_reason
+                current_positions,
+                latest_prices,
+                drawdown_reason,
+                session=Session.NONE if market_open else Session.ETH,
+                fill_outside_rth=not market_open,
             )
             render_paper_plan(
                 PaperPlan(
@@ -579,6 +546,8 @@ def _run_one_shot_trade(
             latest_prices,
             settings.stop_loss_pct,
             settings.take_profit_pct,
+            session=Session.NONE if market_open else Session.ETH,
+            fill_outside_rth=not market_open,
         )
 
         if risk_orders:

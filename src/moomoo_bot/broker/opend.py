@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-import time
+from time import sleep
 from typing import Protocol
 
 import pandas as pd
@@ -89,7 +89,7 @@ class MoomooOpenDClient:
                 return data
             if attempt == _QUOTE_REQUEST_RETRIES or not _is_transient_quote_error(data):
                 raise RuntimeError(f"Failed to fetch {label}: {data}")
-            time.sleep(_QUOTE_REQUEST_RETRY_DELAY_SECONDS * attempt)
+            sleep(_QUOTE_REQUEST_RETRY_DELAY_SECONDS * attempt)
         raise RuntimeError(f"Failed to fetch {label}: exhausted retries")
 
     def fetch_history(
@@ -128,7 +128,7 @@ class MoomooOpenDClient:
                     raise RuntimeError(
                         f"Failed to fetch historical candlesticks for {code}: {data}"
                     )
-                time.sleep(_HISTORY_REQUEST_RETRY_DELAY_SECONDS * attempt)
+                sleep(_HISTORY_REQUEST_RETRY_DELAY_SECONDS * attempt)
             if isinstance(data, pd.DataFrame) and not data.empty:
                 pages.append(data)
             if page_req_key is None:

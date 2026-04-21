@@ -7,7 +7,7 @@ Related: cli.py.
 from pathlib import Path
 
 import pandas as pd
-from moomoo import Session, TrdEnv
+from moomoo import TrdEnv
 
 from moomoo_bot.broker import MoomooOpenDClient
 from moomoo_bot.strategy.momentum import (
@@ -98,30 +98,8 @@ def position_quantities(position_frame: pd.DataFrame) -> dict[str, float]:
     return positions
 
 
-def require_paper_mode(settings, command_name: str) -> None:
-    if settings.execution_mode != "paper":
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_EXECUTION_MODE=paper")
-
-
-def require_live_mode(settings, command_name: str, confirm_live_trading: bool) -> None:
-    if settings.execution_mode != "live":
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_EXECUTION_MODE=live")
-    if not settings.allow_live_trading:
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_ALLOW_LIVE_TRADING=true")
-    if not confirm_live_trading:
-        raise ValueError(f"{command_name} requires --confirm-live-trading")
-
-
 def trade_mode_label(trd_env: TrdEnv) -> str:
     return "live" if trd_env == TrdEnv.REAL else "paper"
-
-
-def select_session(market_open: bool) -> Session:
-    return Session.NONE if market_open else Session.ETH
-
-
-def select_fill_outside_rth(market_open: bool) -> bool:
-    return not market_open
 
 
 def submit_orders_with_duplicate_guard(

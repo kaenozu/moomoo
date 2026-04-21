@@ -25,7 +25,7 @@ from moomoo_bot.strategy.momentum import (
 
 
 @dataclass(frozen=True)
-class MomentumSearchResult:
+class _SearchResultBase:
     config: MonthlyMomentumRotationConfig
     full_result: BacktestResult
     train_excess: float
@@ -58,37 +58,13 @@ class MomentumSearchResult:
 
 
 @dataclass(frozen=True)
-class SatelliteSearchResult:
-    config: MonthlyMomentumRotationConfig
-    satellite_weight: float
-    full_result: BacktestResult
-    train_excess: float
-    test_excess: float
-    train_cagr: float
-    test_cagr: float
-    test_sharpe: float
-    train_drawdown: float
-    test_drawdown: float
+class MomentumSearchResult(_SearchResultBase):
+    pass
 
-    @property
-    def full_excess(self) -> float:
-        return self.full_result.total_return - self.full_result.benchmark_return
 
-    @property
-    def full_cagr(self) -> float:
-        return self.full_result.cagr
-
-    @property
-    def full_sharpe(self) -> float:
-        return self.full_result.sharpe
-
-    @property
-    def full_drawdown(self) -> float:
-        return self.full_result.max_drawdown
-
-    @property
-    def trade_count(self) -> int:
-        return self.full_result.trade_count
+@dataclass(frozen=True)
+class SatelliteSearchResult(_SearchResultBase):
+    satellite_weight: float = 0.0
 
 
 def default_momentum_search_configs(
