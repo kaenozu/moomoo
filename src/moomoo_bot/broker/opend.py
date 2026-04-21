@@ -1,3 +1,9 @@
+"""Moomoo OpenD quote client module.
+
+Purpose: Fetch market data, snapshots, and historical prices from OpenD.
+Related: broker/__init__.py, config.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

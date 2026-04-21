@@ -1,12 +1,18 @@
+"""Strategy research and candidate search module.
+
+Purpose: Search and rank momentum strategy candidates and satellite blends.
+Related: backtest.py, strategy/momentum.py.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
 from typing import Sequence
 
 import pandas as pd
 
 from moomoo_bot.backtest import BacktestResult, run_backtest
+from moomoo_bot.backtest.engine import blend_result_with_benchmark, annualized_return, sharpe_ratio, max_drawdown
 from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
 
 
@@ -249,53 +255,9 @@ def _split_period_boundaries(index: pd.Index, split_ratio: float) -> tuple[pd.Ti
 
 
 def _blend_with_benchmark(strategy_result: BacktestResult, satellite_weight: float) -> BacktestResult:
-    if not 0.0 <= satellite_weight <= 1.0:
-        raise ValueError("satellite_weight must be between 0.0 and 1.0")
-
-    strategy_returns = strategy_result.equity_curve.pct_change().fillna(0.0)
-    benchmark_returns = strategy_result.benchmark_curve.pct_change().fillna(0.0)
-    blended_returns = satellite_weight * strategy_returns + (1.0 - satellite_weight) * benchmark_returns
-    blended_equity = (1.0 + blended_returns).cumprod()
-    blended_equity.name = "equity"
-
-    benchmark_return = float(strategy_result.benchmark_curve.iloc[-1] / strategy_result.benchmark_curve.iloc[0] - 1.0)
-    total_return = float(blended_equity.iloc[-1] / blended_equity.iloc[0] - 1.0)
-    volatility = float(blended_returns.iloc[1:].std(ddof=0) * sqrt(252)) if len(blended_returns) > 1 else 0.0
-
-    return BacktestResult(
-        equity_curve=blended_equity,
-        benchmark_curve=strategy_result.benchmark_curve,
-        trade_count=strategy_result.trade_count,
-        total_return=total_return,
-        benchmark_return=benchmark_return,
-        cagr=_annualized_return(blended_equity),
-        benchmark_cagr=_annualized_return(strategy_result.benchmark_curve),
-        volatility=volatility,
-        sharpe=_sharpe_ratio(blended_returns.iloc[1:]),
-        max_drawdown=_max_drawdown(blended_equity),
-        outperformance=total_return - benchmark_return,
-    )
+    return blend_result_with_benchmark(strategy_result, satellite_weight)
 
 
-def _annualized_return(curve: pd.Series) -> float:
-    elapsed_days = (curve.index[-1] - curve.index[0]).days
-    if elapsed_days <= 0:
-        return 0.0
-    years = elapsed_days / 365.25
-    start_value = float(curve.iloc[0])
-    if start_value <= 0.0:
-        return 0.0
-    return float((curve.iloc[-1] / start_value) ** (1.0 / years) - 1.0)
-
-
-def _sharpe_ratio(returns: pd.Series) -> float:
-    if len(returns) < 2:
-        return 0.0
-    stdev = float(returns.std(ddof=0))
-    if stdev == 0.0:
-        return 0.0
-    return float((returns.mean() / stdev) * sqrt(252))
-
-
-def _max_drawdown(curve: pd.Series) -> float:
-    return float(curve.div(curve.cummax()).sub(1.0).min())
+_annualized_return = annualized_return
+_sharpe_ratio = sharpe_ratio
+_max_drawdown = max_drawdown

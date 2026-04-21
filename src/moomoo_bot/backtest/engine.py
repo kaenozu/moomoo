@@ -1,3 +1,9 @@
+"""Backtest engine module.
+
+Purpose: Run strategy backtests and compute performance metrics.
+Related: backtest/__init__.py, strategy modules.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -113,7 +119,6 @@ def run_backtest(
     equity_curve = pd.Series(equity_values, index=dates, name="equity")
     benchmark_curve = pd.Series(benchmark_values, index=dates, name="benchmark")
     portfolio_return_series = pd.Series(portfolio_returns, index=dates[1:], name="portfolio_return")
-    benchmark_return_series = pd.Series(benchmark_returns, index=dates[1:], name="benchmark_return")
 
     total_return = float(equity_curve.iloc[-1] / equity_curve.iloc[0] - 1.0)
     benchmark_total_return = float(benchmark_curve.iloc[-1] / benchmark_curve.iloc[0] - 1.0)
@@ -138,17 +143,21 @@ def run_backtest(
     )
 
 
-def _annualized_return(curve: pd.Series) -> float:
+def annualized_return(curve: pd.Series) -> float:
     if len(curve) < 2:
         return 0.0
     elapsed_days = (curve.index[-1] - curve.index[0]).days
     if elapsed_days <= 0:
         return 0.0
     years = elapsed_days / 365.25
-    return float(curve.iloc[-1] ** (1.0 / years) - 1.0)
+    starting_value = float(curve.iloc[0])
+    ending_value = float(curve.iloc[-1])
+    if starting_value <= 0.0:
+        return 0.0
+    return float((ending_value / starting_value) ** (1.0 / years) - 1.0)
 
 
-def _sharpe_ratio(returns: pd.Series) -> float:
+def sharpe_ratio(returns: pd.Series) -> float:
     if len(returns) < 2:
         return 0.0
     stdev = float(returns.std(ddof=0))
@@ -157,7 +166,12 @@ def _sharpe_ratio(returns: pd.Series) -> float:
     return float((returns.mean() / stdev) * sqrt(252))
 
 
-def _max_drawdown(curve: pd.Series) -> float:
+def max_drawdown(curve: pd.Series) -> float:
     running_max = curve.cummax()
     drawdown = curve.div(running_max).sub(1.0)
     return float(drawdown.min())
+
+
+_annualized_return = annualized_return
+_sharpe_ratio = sharpe_ratio
+_max_drawdown = max_drawdown

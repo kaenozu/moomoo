@@ -1,3 +1,9 @@
+"""Sample data generation module.
+
+Purpose: Generate random walk price data for backtest demos.
+Related: backtest/engine.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

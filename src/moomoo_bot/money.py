@@ -1,3 +1,9 @@
+"""Currency conversion module.
+
+Purpose: Convert capital between JPY and USD.
+Related: cli.py, config.py.
+"""
+
 from __future__ import annotations
 
 

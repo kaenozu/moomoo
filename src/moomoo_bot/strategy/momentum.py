@@ -1,3 +1,9 @@
+"""Momentum rotation strategy module.
+
+Purpose: Cross-sectional and monthly momentum rotation strategies.
+Related: strategy/base.py, backtest/engine.py.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

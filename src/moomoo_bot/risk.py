@@ -1,20 +1,19 @@
+"""Risk management module.
+
+Purpose: Handle risk detection, stop-loss, take-profit, and position liquidation.
+Related: cli.py, paper.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import floor
 
 import pandas as pd
 from moomoo import Session, TrdSide
 
 from moomoo_bot.paper import PaperOrderInstruction
-
-
-@dataclass(frozen=True)
-class RiskSettings:
-    max_drawdown_pct: float = 0.15
-    market_shock_drop_pct: float = 0.05
-    stop_loss_pct: float = 0.10
-    take_profit_pct: float = 0.20
 
 
 @dataclass
@@ -78,7 +77,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = round(float(quantity), 3)
+        sell_qty = _normalize_order_quantity(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -117,6 +116,9 @@ def build_stop_loss_take_profit_orders(
         quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
         if quantity is None or quantity <= 0.0:
             continue
+        quantity = _normalize_order_quantity(quantity)
+        if quantity <= 0.0:
+            continue
 
         basis = _extract_float(row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost"))
         if basis is None or basis <= 0.0:
@@ -128,7 +130,7 @@ def build_stop_loss_take_profit_orders(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=round(quantity, 3),
+                    quantity=quantity,
                     price=latest_price,
                     reason=f"risk:stop_loss:{symbol}:{latest_price:.2f}<={basis:.2f}",
                     session=session,
@@ -142,7 +144,7 @@ def build_stop_loss_take_profit_orders(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=round(quantity, 3),
+                    quantity=quantity,
                     price=latest_price,
                     reason=f"risk:take_profit:{symbol}:{latest_price:.2f}>={basis:.2f}",
                     session=session,
@@ -176,3 +178,8 @@ def _extract_float(row: pd.Series, fields: tuple[str, ...]) -> float | None:
         if numeric > 0.0:
             return numeric
     return None
+
+
+def _normalize_order_quantity(quantity: float) -> float:
+    normalized_quantity = floor(abs(float(quantity)))
+    return float(normalized_quantity) if normalized_quantity > 0 else 0.0

@@ -1,3 +1,9 @@
+"""Configuration module.
+
+Purpose: Load and manage application settings from environment variables.
+Related: cli.py, risk.py.
+"""
+
 from functools import lru_cache
 from typing import Literal
 

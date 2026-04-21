@@ -24,11 +24,11 @@ set "MOOMOO_BOT_OPEND_HOST=%HOST%"
 set "MOOMOO_BOT_OPEND_PORT=%PORT%"
 set "MOOMOO_BOT_CAPITAL_CURRENCY=%CAPITAL_CURRENCY%"
 
-echo Starting paper-trade order run against OpenD at %MOOMOO_BOT_OPEND_HOST%:%MOOMOO_BOT_OPEND_PORT% with %CAPITAL% %CAPITAL_CURRENCY% input...
+echo Starting paper-trade monitor against OpenD at %MOOMOO_BOT_OPEND_HOST%:%MOOMOO_BOT_OPEND_PORT% with %CAPITAL% %CAPITAL_CURRENCY% input...
 
 if "%FX_JPY_PER_USD%"=="" (
-    "%PYTHON%" -m moomoo_bot.cli paper-trade --capital %CAPITAL% --history-days %HISTORY_DAYS%
+    "%PYTHON%" -m moomoo_bot.cli auto-run --capital %CAPITAL% --history-days %HISTORY_DAYS%
 ) else (
-    "%PYTHON%" -m moomoo_bot.cli paper-trade --capital %CAPITAL% --history-days %HISTORY_DAYS% --fx-jpy-per-usd %FX_JPY_PER_USD%
+    "%PYTHON%" -m moomoo_bot.cli auto-run --capital %CAPITAL% --history-days %HISTORY_DAYS% --fx-jpy-per-usd %FX_JPY_PER_USD%
 )
 exit /b %errorlevel%

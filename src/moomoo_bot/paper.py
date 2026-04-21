@@ -1,3 +1,9 @@
+"""Paper trading allocation and order instruction module.
+
+Purpose: Build paper trade plan and convert decisions to order instructions.
+Related: cli.py, strategy modules.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -110,7 +116,7 @@ def build_paper_rebalance_orders(
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = round(allocation.target_quantity - current_qty, 3)
+        delta = _normalize_order_quantity(allocation.target_quantity - current_qty)
         if delta > 0.0:
             instructions.append(
                 PaperOrderInstruction(
@@ -139,7 +145,7 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = round(float(current_qty), 3)
+        sell_qty = _normalize_order_quantity(float(current_qty))
         if sell_qty > 0.0:
             if symbol not in prices:
                 raise ValueError(f"missing latest price for liquidation symbol {symbol}")
@@ -163,3 +169,14 @@ def build_paper_rebalance_orders(
             instruction.symbol,
         ),
     )
+
+
+def _normalize_order_quantity(quantity: float) -> float:
+    signed_quantity = float(quantity)
+    if signed_quantity > 0.0:
+        normalized_quantity = floor(signed_quantity)
+        return float(normalized_quantity) if normalized_quantity > 0 else 0.0
+    if signed_quantity < 0.0:
+        normalized_quantity = floor(abs(signed_quantity))
+        return float(-normalized_quantity) if normalized_quantity > 0 else 0.0
+    return 0.0

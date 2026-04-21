@@ -55,7 +55,7 @@ def test_build_liquidation_orders_sells_all_positions() -> None:
     orders = build_liquidation_orders({"US.AAPL": 3.0, "US.MSFT": 1.5}, {"US.AAPL": 90.0, "US.MSFT": 80.0}, "risk:halt")
 
     assert [order.symbol for order in orders] == ["US.AAPL", "US.MSFT"]
-    assert [order.quantity for order in orders] == [3.0, 1.5]
+    assert [order.quantity for order in orders] == [3.0, 1.0]
 
 
 def test_build_liquidation_orders_can_route_closed_market_sells_to_eth() -> None:

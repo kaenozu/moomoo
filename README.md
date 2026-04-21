@@ -28,8 +28,10 @@ pytest
 
 On Windows, you can also double-click a batch file from the repository root to run the bot:
 
-- `run-paper-trade.bat` runs the paper-trade order submission flow once.
+- `run-paper-trade.bat` runs the paper-trade monitoring flow.
 - `run-auto-run.bat` runs the dedicated auto-monitoring flow.
+
+If you want the one-shot order submission path, run `moomoo-bot paper-trade` directly instead of the batch file.
 
 The paper-trading path now has two steps: `paper-run` prints the target rebalance plan, and `paper-trade` submits simulate orders through OpenD.
 

@@ -1,3 +1,9 @@
+"""Strategy base module.
+
+Purpose: Define Strategy protocol and TradeDecision.
+Related: strategy/__init__.py, backtest/engine.py.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
