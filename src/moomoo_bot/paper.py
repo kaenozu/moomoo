@@ -116,7 +116,7 @@ def build_paper_rebalance_orders(
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = _normalize_order_quantity(allocation.target_quantity - current_qty)
+        delta = normalize_order_quantity(allocation.target_quantity - current_qty)
         if delta > 0.0:
             instructions.append(
                 PaperOrderInstruction(
@@ -145,7 +145,7 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = _normalize_order_quantity(float(current_qty))
+        sell_qty = normalize_order_quantity(float(current_qty))
         if sell_qty > 0.0:
             if symbol not in prices:
                 raise ValueError(f"missing latest price for liquidation symbol {symbol}")
@@ -171,12 +171,6 @@ def build_paper_rebalance_orders(
     )
 
 
-def _normalize_order_quantity(quantity: float) -> float:
-    signed_quantity = float(quantity)
-    if signed_quantity > 0.0:
-        normalized_quantity = floor(signed_quantity)
-        return float(normalized_quantity) if normalized_quantity > 0 else 0.0
-    if signed_quantity < 0.0:
-        normalized_quantity = floor(abs(signed_quantity))
-        return float(-normalized_quantity) if normalized_quantity > 0 else 0.0
-    return 0.0
+def normalize_order_quantity(quantity: float) -> float:
+    rounded = round(float(quantity), 3)
+    return rounded if rounded != 0.0 else 0.0

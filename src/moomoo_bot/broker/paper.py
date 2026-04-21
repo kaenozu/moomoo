@@ -7,6 +7,7 @@ Related: broker/__init__.py, paper.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isclose
 
 import pandas as pd
 from moomoo import OpenSecTradeContext, OrderStatus, OrderType, RET_OK, Session, TrdEnv, TrdMarket
@@ -164,8 +165,8 @@ def _order_matches_instruction(order_row: pd.Series, instruction: PaperOrderInst
     return (
         _normalize_text(order_row.get("code")) == instruction.symbol
         and _normalize_text(order_row.get("trd_side")).upper() == str(instruction.side).upper()
-        and float(order_row.get("qty", 0.0) or 0.0) == float(instruction.quantity)
-        and float(order_row.get("price", 0.0) or 0.0) == float(instruction.price)
+        and isclose(float(order_row.get("qty", 0.0) or 0.0), float(instruction.quantity), rel_tol=1e-6)
+        and isclose(float(order_row.get("price", 0.0) or 0.0), float(instruction.price), rel_tol=1e-6)
         and _normalize_order_session(order_row.get("session")) == _normalize_order_session(instruction.session)
         and _normalize_order_bool(order_row.get("fill_outside_rth")) == bool(instruction.fill_outside_rth)
         and _normalize_text(order_row.get("remark")) == _normalize_text(instruction.reason)

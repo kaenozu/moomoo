@@ -8,12 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import floor
 
 import pandas as pd
 from moomoo import Session, TrdSide
 
-from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.paper import PaperOrderInstruction, normalize_order_quantity
 
 
 @dataclass
@@ -77,7 +76,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = _normalize_order_quantity(quantity)
+        sell_qty = normalize_order_quantity(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -116,7 +115,7 @@ def build_stop_loss_take_profit_orders(
         quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
         if quantity is None or quantity <= 0.0:
             continue
-        quantity = _normalize_order_quantity(quantity)
+        quantity = normalize_order_quantity(quantity)
         if quantity <= 0.0:
             continue
 
@@ -178,8 +177,3 @@ def _extract_float(row: pd.Series, fields: tuple[str, ...]) -> float | None:
         if numeric > 0.0:
             return numeric
     return None
-
-
-def _normalize_order_quantity(quantity: float) -> float:
-    normalized_quantity = floor(abs(float(quantity)))
-    return float(normalized_quantity) if normalized_quantity > 0 else 0.0

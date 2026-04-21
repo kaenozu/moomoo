@@ -154,6 +154,8 @@ def annualized_return(curve: pd.Series) -> float:
     ending_value = float(curve.iloc[-1])
     if starting_value <= 0.0:
         return 0.0
+    if ending_value <= 0.0:
+        return 0.0
     return float((ending_value / starting_value) ** (1.0 / years) - 1.0)
 
 

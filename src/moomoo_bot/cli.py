@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from time import sleep
 
-import pandas as pd
 import typer
 from moomoo import Session, TrdEnv
 from rich.table import Table
