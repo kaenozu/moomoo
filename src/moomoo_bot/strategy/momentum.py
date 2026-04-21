@@ -74,12 +74,22 @@ class MonthlyMomentumRotationStrategy:
     This is the strategy family that performed best in the real-data search:
     long-only, equal-weighted, equal-weighted, monthly rebalanced, 12-month
     lookback, 12-month trend filter, and a 1-month skip.
+
+    NOTE: This strategy is stateful. Each call to ``decide`` updates internal
+    tracking of current holdings, entry indices, and the last rebalance point.
+    Call ``reset()`` before reusing the same instance for a fresh backtest run,
+    or create a new instance for each independent run.
     """
 
     def __init__(self, config: MonthlyMomentumRotationConfig | None = None) -> None:
         self.config = config or MonthlyMomentumRotationConfig()
         self._current_weights: dict[str, float] = {}
         self._entry_index: dict[str, int] = {}
+        self._last_rebalance_length = -1
+
+    def reset(self) -> None:
+        self._current_weights = {}
+        self._entry_index = {}
         self._last_rebalance_length = -1
 
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:

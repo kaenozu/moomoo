@@ -179,4 +179,4 @@ def build_paper_rebalance_orders(
 
 def normalize_order_quantity(quantity: float) -> float:
     rounded = round(float(quantity), 3)
-    return rounded if rounded != 0.0 else 0.0
+    return rounded if abs(rounded) > 0.0 else 0.0
