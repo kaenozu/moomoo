@@ -109,7 +109,7 @@ def test_paper_trade_skips_duplicate_active_orders(monkeypatch) -> None:
                 "order_status": "SUBMITTED",
                 "code": "US.AAPL",
                 "trd_side": "BUY",
-                "qty": 980.0,
+                "qty": 980.392,
                 "price": 102.0,
                 "session": "N/A",
                 "fill_outside_rth": False,

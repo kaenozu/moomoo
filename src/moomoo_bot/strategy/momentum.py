@@ -30,18 +30,24 @@ class MomentumRotationStrategy:
         frame = prices.loc[:as_of].dropna(how="all")
         required_rows = max(self.config.lookback_days, self.config.trend_days) + 1
         if len(frame) < required_rows:
-            return TradeDecision(as_of=as_of, target_weights={}, reason="insufficient_history")
+            return TradeDecision(
+                as_of=as_of, target_weights={}, reason="insufficient_history"
+            )
 
         latest = frame.iloc[-1]
         past = frame.iloc[-(self.config.lookback_days + 1)]
         trend = frame.tail(self.config.trend_days).mean()
 
         momentum = latest.div(past).sub(1.0)
-        eligible = momentum[(latest > trend) & momentum.notna()].sort_values(ascending=False)
+        eligible = momentum[(latest > trend) & momentum.notna()].sort_values(
+            ascending=False
+        )
         selected = eligible.head(self.config.top_n)
 
         if selected.empty:
-            return TradeDecision(as_of=as_of, target_weights={}, reason="no_symbols_above_trend")
+            return TradeDecision(
+                as_of=as_of, target_weights={}, reason="no_symbols_above_trend"
+            )
 
         weight = 1.0 / len(selected)
         target_weights = {symbol: weight for symbol in selected.index}
@@ -78,18 +84,30 @@ class MonthlyMomentumRotationStrategy:
 
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         frame = prices.loc[:as_of].dropna(how="all")
-        required_rows = max(self.config.lookback_days + self.config.skip_days + 1, self.config.trend_days + 1)
+        required_rows = max(
+            self.config.lookback_days + self.config.skip_days + 1,
+            self.config.trend_days + 1,
+        )
         if len(frame) < required_rows:
-            return TradeDecision(as_of=as_of, target_weights={}, reason="insufficient_history")
+            return TradeDecision(
+                as_of=as_of, target_weights={}, reason="insufficient_history"
+            )
 
-        should_rebalance = self._last_rebalance_length < 0 or (len(frame) - required_rows) % self.config.rebalance_days == 0
+        should_rebalance = (
+            self._last_rebalance_length < 0
+            or (len(frame) - required_rows) % self.config.rebalance_days == 0
+        )
         if should_rebalance:
             latest = frame.iloc[-1]
             trend = frame.tail(self.config.trend_days).mean()
-            reference = frame.iloc[-(self.config.lookback_days + self.config.skip_days + 1)]
+            reference = frame.iloc[
+                -(self.config.lookback_days + self.config.skip_days + 1)
+            ]
             momentum = latest.div(reference).sub(1.0)
 
-            eligible = momentum[(latest > trend) & momentum.notna()].sort_values(ascending=False)
+            eligible = momentum[(latest > trend) & momentum.notna()].sort_values(
+                ascending=False
+            )
             selected_symbols = eligible.head(self.config.top_n).index.tolist()
 
             if not selected_symbols:
@@ -97,21 +115,32 @@ class MonthlyMomentumRotationStrategy:
                 if self.config.min_hold_days > 0:
                     for symbol, weight in self._current_weights.items():
                         entry_index = self._entry_index.get(symbol)
-                        if entry_index is not None and len(frame) - entry_index < self.config.min_hold_days:
+                        if (
+                            entry_index is not None
+                            and len(frame) - entry_index < self.config.min_hold_days
+                        ):
                             preserved[symbol] = weight
                 self._current_weights = preserved
-                self._entry_index = {symbol: self._entry_index[symbol] for symbol in preserved}
+                self._entry_index = {
+                    symbol: self._entry_index[symbol] for symbol in preserved
+                }
                 reason = "no_symbols_above_trend"
             else:
                 preserved: dict[str, float] = {}
                 if self.config.min_hold_days > 0:
                     for symbol, weight in self._current_weights.items():
                         entry_index = self._entry_index.get(symbol)
-                        if symbol not in selected_symbols and entry_index is not None and len(frame) - entry_index < self.config.min_hold_days:
+                        if (
+                            symbol not in selected_symbols
+                            and entry_index is not None
+                            and len(frame) - entry_index < self.config.min_hold_days
+                        ):
                             preserved[symbol] = weight
 
                 remaining_weight = max(0.0, 1.0 - sum(preserved.values()))
-                new_symbols = [symbol for symbol in selected_symbols if symbol not in preserved]
+                new_symbols = [
+                    symbol for symbol in selected_symbols if symbol not in preserved
+                ]
                 new_weights: dict[str, float] = {}
                 if new_symbols and remaining_weight > 0.0:
                     share = remaining_weight / len(new_symbols)
@@ -131,4 +160,6 @@ class MonthlyMomentumRotationStrategy:
         else:
             reason = "hold"
 
-        return TradeDecision(as_of=as_of, target_weights=self._current_weights, reason=reason)
+        return TradeDecision(
+            as_of=as_of, target_weights=self._current_weights, reason=reason
+        )

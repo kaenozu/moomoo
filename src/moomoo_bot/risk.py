@@ -44,7 +44,9 @@ def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | N
     return None
 
 
-def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_pct: float) -> str | None:
+def update_drawdown_state(
+    account_value: float, state: RiskState, max_drawdown_pct: float
+) -> str | None:
     if account_value <= 0.0:
         account_value = 0.0
 
@@ -112,14 +114,18 @@ def build_stop_loss_take_profit_orders(
         if not symbol or symbol not in latest_prices:
             continue
 
-        quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
+        quantity = _extract_float(
+            row, ("qty", "position_qty", "holding_qty", "can_use_qty")
+        )
         if quantity is None or quantity <= 0.0:
             continue
         quantity = normalize_order_quantity(quantity)
         if quantity <= 0.0:
             continue
 
-        basis = _extract_float(row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost"))
+        basis = _extract_float(
+            row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost")
+        )
         if basis is None or basis <= 0.0:
             continue
 

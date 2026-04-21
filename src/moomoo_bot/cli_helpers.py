@@ -10,7 +10,10 @@ import pandas as pd
 from moomoo import Session, TrdEnv
 
 from moomoo_bot.broker import MoomooOpenDClient
-from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
+from moomoo_bot.strategy.momentum import (
+    MonthlyMomentumRotationConfig,
+    MonthlyMomentumRotationStrategy,
+)
 
 
 def parse_symbols(raw_symbols: str | None) -> list[str]:
@@ -38,7 +41,9 @@ def fetch_market_state(client: MoomooOpenDClient, benchmark_symbol: str) -> str:
     market_state_frame = client.fetch_market_state([benchmark_symbol])
     if market_state_frame.empty:
         raise RuntimeError(f"No market state returned for {benchmark_symbol}")
-    market_state = str(market_state_frame.iloc[0].get("market_state", "")).strip().upper()
+    market_state = (
+        str(market_state_frame.iloc[0].get("market_state", "")).strip().upper()
+    )
     if not market_state:
         raise RuntimeError(f"Market state returned no value for {benchmark_symbol}")
     return market_state
@@ -74,7 +79,9 @@ def build_monthly_strategy(settings, min_hold_days: int | None = None):
             top_n=settings.top_n,
             skip_days=settings.skip_days,
             rebalance_days=settings.rebalance_days,
-            min_hold_days=min_hold_days if min_hold_days is not None else settings.min_hold_days,
+            min_hold_days=min_hold_days
+            if min_hold_days is not None
+            else settings.min_hold_days,
         )
     )
 
@@ -117,11 +124,14 @@ def select_fill_outside_rth(market_open: bool) -> bool:
     return not market_open
 
 
-def submit_orders_with_duplicate_guard(trade_client, instructions, mode_label: str, render_func) -> None:
+def submit_orders_with_duplicate_guard(
+    trade_client, instructions, mode_label: str, render_func
+) -> None:
     for instruction in instructions:
         matching_order = get_matching_active_order(trade_client, instruction)
         if matching_order is not None:
             from moomoo_bot.cli_render import console
+
             console.print(
                 f"Skipping duplicate {mode_label} order for {instruction.symbol} qty={instruction.quantity:.3f} "
                 f"price={instruction.price:.2f} order_id={matching_order.get('order_id')} "

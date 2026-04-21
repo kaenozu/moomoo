@@ -22,4 +22,3 @@ class TradeDecision:
 class Strategy(Protocol):
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         """Return the target portfolio weights for the next rebalance."""
-
