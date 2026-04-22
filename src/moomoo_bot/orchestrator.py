@@ -73,7 +73,7 @@ def run_one_shot_trade(
             render_risk_orders([], current_positions, "Risk Stop Orders")
             return
 
-        drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct)
+        drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct, settings.max_drawdown_reset_pct)
         if drawdown_reason:
             liquidation_orders = build_liquidation_orders(current_positions, latest_prices, drawdown_reason)
             render_paper_plan(
@@ -206,25 +206,30 @@ def run_auto_monitor(
                     sleep(poll_seconds)
                     continue
 
-                drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct, getattr(settings, "max_drawdown_reset_pct", 0.05))
-                if drawdown_reason:
-                    liquidation_orders = build_liquidation_orders(
-                        current_positions,
-                        latest_prices,
-                        drawdown_reason,
-                        session=Session.NONE if market_open else Session.ETH,
-                        fill_outside_rth=not market_open,
-                    )
-                    render_risk_orders(liquidation_orders, current_positions, "Risk Stop Orders")
-                    if liquidation_orders:
-                        console.print("Submitting risk stop liquidation orders...")
-                        _submit_orders_with_duplicate_guard(trade_client, liquidation_orders, "paper", render_order_response)
-                    logger.warning(f"Trading halted - {drawdown_reason}")
-                    console.print(f"{price_frame.index[-1].date()}: trading halted - {drawdown_reason}")
-                    break
+                drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct, settings.max_drawdown_reset_pct)
+                if risk_state.halted:
+                    if drawdown_reason:
+                        liquidation_orders = build_liquidation_orders(
+                            current_positions,
+                            latest_prices,
+                            drawdown_reason,
+                            session=Session.NONE if market_open else Session.ETH,
+                            fill_outside_rth=not market_open,
+                        )
+                        render_risk_orders(liquidation_orders, current_positions, "Risk Stop Orders")
+                        if liquidation_orders:
+                            console.print("Submitting risk stop liquidation orders...")
+                            _submit_orders_with_duplicate_guard(trade_client, liquidation_orders, "paper", render_order_response)
+                        logger.warning(f"Trading halted - {drawdown_reason}")
+                        console.print(f"{price_frame.index[-1].date()}: trading halted - {drawdown_reason}")
+                    else:
+                        risk_state.peak_account_value = account_value
+                        console.print(f"{price_frame.index[-1].date()}: drawdown recovered, resuming normal operations")
+                    sleep(poll_seconds)
+                    continue
 
                 decision = strategy.decide(price_frame, price_frame.index[-1])
-                max_pos_weight = getattr(settings, "max_single_position_weight", 1.0)
+                max_pos_weight = settings.max_single_position_weight
                 plan = build_paper_plan(price_frame, decision, paper_capital_usd, minimum_order_value=minimum_order_value, max_position_weight=max_pos_weight)
                 instructions = build_paper_rebalance_orders(
                     plan,

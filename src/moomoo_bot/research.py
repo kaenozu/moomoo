@@ -127,7 +127,8 @@ def search_momentum_candidates(
 
     ranked_results: list[MomentumSearchResult] = []
     for config in candidate_configs:
-        full_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config))
+        full_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config),
+                         transaction_cost_per_trade=0.0, transaction_cost_bps=0.0)
         train_metrics = _summarize_period(full_result.equity_curve, full_result.benchmark_curve, prices.index[0], train_end_date)
         test_metrics = _summarize_period(full_result.equity_curve, full_result.benchmark_curve, test_start_date, prices.index[-1])
 
@@ -183,7 +184,8 @@ def search_satellite_candidates(
 
     ranked_results: list[SatelliteSearchResult] = []
     for config in candidate_configs:
-        strategy_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config))
+        strategy_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config),
+                              transaction_cost_per_trade=0.0, transaction_cost_bps=0.0)
         for satellite_weight in candidate_weights:
             blended_result = _blend_with_benchmark(strategy_result, satellite_weight)
             train_metrics = _summarize_period(

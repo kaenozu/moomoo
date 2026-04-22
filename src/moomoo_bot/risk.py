@@ -50,8 +50,8 @@ def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_p
         account_value = 0.0
 
     if state.halted and state.peak_account_value is not None and account_value > 0.0:
-        recovery_pct = (account_value - state.peak_account_value) / state.peak_account_value
-        if reset_threshold_pct > 0.0 and recovery_pct >= reset_threshold_pct:
+        current_drawdown = (state.peak_account_value - account_value) / state.peak_account_value
+        if reset_threshold_pct > 0.0 and current_drawdown <= reset_threshold_pct:
             state.halted = False
             state.halted_reason = None
 

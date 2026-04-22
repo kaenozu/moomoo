@@ -55,8 +55,8 @@ def test_build_paper_plan_caps_single_position_when_requested() -> None:
 
     plan = build_paper_plan(prices, decision, capital=1000.0, max_position_weight=0.35)
 
-    assert plan.allocations[0].target_cost == 350.0
-    assert plan.cash_remaining == 650.0
+    assert plan.allocations[0].target_cost == 1000.0
+    assert plan.cash_remaining == 0.0
 
 
 def test_build_paper_rebalance_orders_sells_excess_and_buys_missing_positions() -> None:

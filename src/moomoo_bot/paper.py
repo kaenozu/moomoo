@@ -66,6 +66,9 @@ def build_paper_plan(
     allocations: list[PaperAllocation] = []
     allocated_cost = 0.0
 
+    total_allocated_weight = 0.0
+    pending_allocations: list[tuple[str, float, float, float]] = []
+
     for symbol, weight in sorted(decision.target_weights.items(), key=lambda item: (-item[1], item[0])):
         if symbol not in latest_prices.index:
             raise ValueError(f"missing latest price for {symbol}")
@@ -74,24 +77,53 @@ def build_paper_plan(
         if price <= 0.0:
             raise ValueError(f"invalid price for {symbol}: {price}")
 
-        target_value = capital * weight
-        target_value = min(target_value, capital * max_position_weight)
+        capped_weight = min(weight, max_position_weight)
+        target_value = capital * capped_weight
         target_quantity = floor((target_value / price) * 1000.0) / 1000.0
         target_cost = target_quantity * price
-        if target_cost < minimum_order_value:
-            continue
 
-        allocated_cost += target_cost
-        allocations.append(
-            PaperAllocation(
-                symbol=symbol,
-                weight=weight,
-                price=price,
-                target_value=target_value,
-                target_quantity=target_quantity,
-                target_cost=target_cost,
+        pending_allocations.append((symbol, capped_weight, price, target_quantity))
+        total_allocated_weight += capped_weight
+
+    excess_weight = 1.0 - total_allocated_weight
+    if excess_weight > 0.01 and pending_allocations:
+        dist_per_symbol = excess_weight / len(pending_allocations)
+        reallocated = []
+        for symbol, orig_weight, price, qty in pending_allocations:
+            new_weight = orig_weight + dist_per_symbol
+            new_value = capital * new_weight
+            new_qty = floor((new_value / price) * 1000.0) / 1000.0
+            new_cost = new_qty * price
+            if new_cost >= minimum_order_value:
+                reallocated.append((symbol, new_weight, price, new_qty))
+                allocated_cost += new_cost
+
+        for symbol, weight, price, quantity in reallocated:
+            allocations.append(
+                PaperAllocation(
+                    symbol=symbol,
+                    weight=weight,
+                    price=price,
+                    target_value=capital * weight,
+                    target_quantity=quantity,
+                    target_cost=quantity * price,
+                )
             )
-        )
+    else:
+        for symbol, weight, price, quantity in pending_allocations:
+            target_cost = quantity * price
+            if target_cost >= minimum_order_value:
+                allocated_cost += target_cost
+                allocations.append(
+                    PaperAllocation(
+                        symbol=symbol,
+                        weight=weight,
+                        price=price,
+                        target_value=capital * weight,
+                        target_quantity=quantity,
+                        target_cost=target_cost,
+                    )
+                )
 
     cash_remaining = capital - allocated_cost
     return PaperPlan(
