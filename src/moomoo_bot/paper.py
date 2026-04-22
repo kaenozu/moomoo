@@ -12,6 +12,9 @@ from collections.abc import Mapping
 
 import pandas as pd
 from moomoo import Session, TrdSide
+from moomoo_bot.quantities import (
+    round_quantity_toward_zero as _round_quantity_toward_zero,
+)
 
 from moomoo_bot.strategy.base import TradeDecision
 
@@ -62,14 +65,14 @@ def build_paper_plan(
     if not 0.0 < max_position_weight <= 1.0:
         raise ValueError("max_position_weight must be between 0 and 1")
 
-    latest_prices = prices.loc[:decision.as_of].iloc[-1]
+    latest_prices = prices.loc[: decision.as_of].iloc[-1]
     allocations: list[PaperAllocation] = []
     allocated_cost = 0.0
+    total_weight = 0.0
 
-    total_allocated_weight = 0.0
-    pending_allocations: list[tuple[str, float, float, float]] = []
-
-    for symbol, weight in sorted(decision.target_weights.items(), key=lambda item: (-item[1], item[0])):
+    for symbol, weight in sorted(
+        decision.target_weights.items(), key=lambda item: (-item[1], item[0])
+    ):
         if symbol not in latest_prices.index:
             raise ValueError(f"missing latest price for {symbol}")
 
@@ -77,53 +80,26 @@ def build_paper_plan(
         if price <= 0.0:
             raise ValueError(f"invalid price for {symbol}: {price}")
 
-        capped_weight = min(weight, max_position_weight)
+        remaining_weight_budget = max(0.0, 1.0 - total_weight)
+        capped_weight = min(weight, max_position_weight, remaining_weight_budget)
         target_value = capital * capped_weight
         target_quantity = floor((target_value / price) * 1000.0) / 1000.0
         target_cost = target_quantity * price
+        if target_cost < minimum_order_value:
+            continue
 
-        pending_allocations.append((symbol, capped_weight, price, target_quantity))
-        total_allocated_weight += capped_weight
-
-    excess_weight = 1.0 - total_allocated_weight
-    if excess_weight > 0.01 and pending_allocations:
-        dist_per_symbol = excess_weight / len(pending_allocations)
-        reallocated = []
-        for symbol, orig_weight, price, qty in pending_allocations:
-            new_weight = orig_weight + dist_per_symbol
-            new_value = capital * new_weight
-            new_qty = floor((new_value / price) * 1000.0) / 1000.0
-            new_cost = new_qty * price
-            if new_cost >= minimum_order_value:
-                reallocated.append((symbol, new_weight, price, new_qty))
-                allocated_cost += new_cost
-
-        for symbol, weight, price, quantity in reallocated:
-            allocations.append(
-                PaperAllocation(
-                    symbol=symbol,
-                    weight=weight,
-                    price=price,
-                    target_value=capital * weight,
-                    target_quantity=quantity,
-                    target_cost=quantity * price,
-                )
+        allocated_cost += target_cost
+        total_weight += capped_weight
+        allocations.append(
+            PaperAllocation(
+                symbol=symbol,
+                weight=capped_weight,
+                price=price,
+                target_value=target_value,
+                target_quantity=target_quantity,
+                target_cost=target_cost,
             )
-    else:
-        for symbol, weight, price, quantity in pending_allocations:
-            target_cost = quantity * price
-            if target_cost >= minimum_order_value:
-                allocated_cost += target_cost
-                allocations.append(
-                    PaperAllocation(
-                        symbol=symbol,
-                        weight=weight,
-                        price=price,
-                        target_value=capital * weight,
-                        target_quantity=quantity,
-                        target_cost=target_cost,
-                    )
-                )
+        )
 
     cash_remaining = capital - allocated_cost
     return PaperPlan(
@@ -143,19 +119,24 @@ def build_paper_rebalance_orders(
 ) -> list[PaperOrderInstruction]:
     positions = current_positions or {}
     prices = latest_prices or {}
-    target_by_symbol = {allocation.symbol: allocation for allocation in plan.allocations}
+    target_by_symbol = {
+        allocation.symbol: allocation for allocation in plan.allocations
+    }
     instructions: list[PaperOrderInstruction] = []
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = allocation.target_quantity - current_qty
-        delta = floor(delta)
+        delta = _round_quantity_toward_zero(allocation.target_quantity - current_qty)
         if delta > 0:
+            # Moomoo paper trading rejects fractional buy quantities.
+            buy_qty = float(floor(delta))
+            if buy_qty < 1.0:
+                continue
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.BUY,
-                    quantity=float(delta),
+                    quantity=buy_qty,
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
@@ -178,10 +159,12 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = floor(float(current_qty))
+        sell_qty = _round_quantity_toward_zero(float(current_qty))
         if sell_qty > 0:
             if symbol not in prices:
-                raise ValueError(f"missing latest price for liquidation symbol {symbol}")
+                raise ValueError(
+                    f"missing latest price for liquidation symbol {symbol}"
+                )
             instructions.append(
                 PaperOrderInstruction(
                     symbol=symbol,
@@ -202,19 +185,3 @@ def build_paper_rebalance_orders(
             instruction.symbol,
         ),
     )
-
-
-def _round_down_to_integer_signed(quantity: float) -> float:
-    """Round towards zero (floor for positive, ceil for negative), then to integer.
-
-    Preserves sign: positive values become 0, 1, 2, ... negative values become 0, -1, -2, ...
-    Used for order quantities where sign direction matters.
-    """
-    signed_quantity = float(quantity)
-    if signed_quantity > 0.0:
-        normalized_quantity = floor(signed_quantity)
-        return float(normalized_quantity) if normalized_quantity > 0 else 0.0
-    if signed_quantity < 0.0:
-        normalized_quantity = floor(abs(signed_quantity))
-        return float(-normalized_quantity) if normalized_quantity > 0 else 0.0
-    return 0.0

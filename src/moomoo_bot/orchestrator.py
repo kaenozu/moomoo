@@ -7,6 +7,9 @@ Related: cli.py, paper.py, risk.py, strategy modules.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import replace
+from decimal import Decimal, ROUND_HALF_UP
 from time import sleep
 
 from moomoo import Session, TrdEnv
@@ -14,6 +17,7 @@ from moomoo import Session, TrdEnv
 from moomoo_bot.broker import MoomooOpenDClient
 from moomoo_bot.broker.paper import MoomooPaperTradeClient
 from moomoo_bot.cli_helpers import (
+    build_monthly_strategy as _build_monthly_strategy,
     fetch_market_state as _fetch_market_state,
     is_regular_market_open as _is_regular_market_open,
     position_quantities as _position_quantities,
@@ -23,6 +27,7 @@ from moomoo_bot.cli_helpers import (
 from moomoo_bot.cli_render import console, render_order_response, render_paper_plan, render_paper_trade_plan, render_risk_orders
 from moomoo_bot.money import convert_capital_to_usd
 from moomoo_bot.paper import PaperPlan, build_paper_plan, build_paper_rebalance_orders
+from moomoo_bot.strategy.base import Strategy
 from moomoo_bot.risk import (
     RiskState,
     build_liquidation_orders,
@@ -32,6 +37,61 @@ from moomoo_bot.risk import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _round_order_price(value: float) -> float:
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _resolve_order_prices(
+    quote_client: MoomooOpenDClient,
+    symbol_universe: list[str],
+    fallback_prices: dict[str, float],
+) -> dict[str, float]:
+    try:
+        snapshot = quote_client.fetch_market_snapshot(symbol_universe)
+    except Exception as exc:
+        logger.warning("Falling back to historical close prices after snapshot fetch failed: %s", exc)
+        return fallback_prices
+
+    if snapshot.empty:
+        return fallback_prices
+
+    order_prices = dict(fallback_prices)
+    for _, row in snapshot.iterrows():
+        code = str(row.get("code", "")).strip()
+        if not code:
+            continue
+        try:
+            last_price = float(row.get("last_price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if last_price > 0.0:
+            order_prices[code] = _round_order_price(last_price)
+    return order_prices
+
+
+def _overlay_latest_prices(price_frame, latest_prices: dict[str, float]):
+    adjusted_frame = price_frame.copy()
+    if adjusted_frame.empty:
+        return adjusted_frame
+    last_index = adjusted_frame.index[-1]
+    for symbol, price in latest_prices.items():
+        if symbol in adjusted_frame.columns:
+            adjusted_frame.loc[last_index, symbol] = price
+    return adjusted_frame
+
+
+def _reprice_orders(instructions, latest_prices: dict[str, float]):
+    repriced = []
+    for instruction in instructions:
+        repriced.append(
+            replace(
+                instruction,
+                price=_round_order_price(latest_prices.get(instruction.symbol, instruction.price)),
+            )
+        )
+    return repriced
 
 
 def run_one_shot_trade(
@@ -45,6 +105,9 @@ def run_one_shot_trade(
     fx_jpy_per_usd: float | None,
     minimum_order_value: float,
     max_position_weight: float = 1.0,
+    quote_client: MoomooOpenDClient | None = None,
+    trade_client: MoomooPaperTradeClient | None = None,
+    strategy: Strategy | None = None,
 ) -> None:
     """Execute a single trading decision and optionally submit orders."""
     selected_symbols = symbols
@@ -53,15 +116,26 @@ def run_one_shot_trade(
     resolved_fx_rate = fx_jpy_per_usd if fx_jpy_per_usd is not None else settings.fx_jpy_per_usd
     paper_capital_usd = convert_capital_to_usd(paper_capital, settings.capital_currency, resolved_fx_rate)
 
-    quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
-    trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port, trd_env=trade_env)
+    owns_quote_client = quote_client is None
+    owns_trade_client = trade_client is None
+    if owns_quote_client:
+        quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
+    if owns_trade_client:
+        try:
+            trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port, trd_env=trade_env)
+        except Exception:
+            if owns_quote_client:
+                quote_client.close()
+            raise
     mode_label = _trade_mode_label(trade_env)
     try:
         position_frame = trade_client.get_position_frame()
         current_positions = _position_quantities(position_frame)
         symbol_universe = list(dict.fromkeys([*selected_symbols, *current_positions.keys()]))
         price_frame, benchmark_series = quote_client.fetch_price_panel(symbol_universe, benchmark_label, history_days=history_days)
-        latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
+        historical_latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
+        latest_prices = _resolve_order_prices(quote_client, symbol_universe, historical_latest_prices)
+        order_price_frame = _overlay_latest_prices(price_frame, latest_prices)
         market_state = _fetch_market_state(quote_client, benchmark_label)
         market_open = _is_regular_market_open(market_state)
         account_value = trade_client.get_account_value() if capital is None else paper_capital_usd
@@ -92,28 +166,19 @@ def run_one_shot_trade(
             _submit_orders_with_duplicate_guard(trade_client, liquidation_orders, mode_label, render_order_response)
             return
 
-        from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
-
-        strategy = MonthlyMomentumRotationStrategy(
-            MonthlyMomentumRotationConfig(
-                lookback_days=settings.lookback_days,
-                trend_days=settings.trend_days,
-                top_n=settings.top_n,
-                skip_days=settings.skip_days,
-                rebalance_days=settings.rebalance_days,
-                min_hold_days=settings.min_hold_days,
-                volatility_lookback_days=settings.volatility_lookback_days,
-                max_volatility_percentile=settings.max_volatility_percentile,
-                relative_strength_lookback_days=settings.relative_strength_lookback_days,
-                fallback_asset_symbol=settings.fallback_asset_symbol,
-                fallback_allocation=settings.fallback_allocation,
-            )
-        )
+        strategy = strategy or _build_monthly_strategy(settings)
         decision = strategy.decide(price_frame, price_frame.index[-1])
-        max_pos_weight = settings.max_single_position_weight
-        plan = build_paper_plan(price_frame, decision, account_value, minimum_order_value=minimum_order_value, max_position_weight=max_pos_weight)
+        plan = build_paper_plan(
+            order_price_frame,
+            decision,
+            account_value,
+            minimum_order_value=minimum_order_value,
+            max_position_weight=max_position_weight,
+        )
         instructions = build_paper_rebalance_orders(plan, current_positions=current_positions, latest_prices=latest_prices, market_open=market_open)
         risk_orders = build_stop_loss_take_profit_orders(position_frame, latest_prices, settings.stop_loss_pct, settings.take_profit_pct)
+        instructions = _reprice_orders(instructions, latest_prices)
+        risk_orders = _reprice_orders(risk_orders, latest_prices)
 
         render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
         if capital is None:
@@ -135,8 +200,10 @@ def run_one_shot_trade(
         elif not risk_orders:
             console.print("No paper orders were required.")
     finally:
-        trade_client.close()
-        quote_client.close()
+        if owns_trade_client:
+            trade_client.close()
+        if owns_quote_client:
+            quote_client.close()
 
 
 def run_auto_monitor(
@@ -150,6 +217,11 @@ def run_auto_monitor(
     minimum_order_value: float,
     poll_seconds: int,
     max_consecutive_failures: int,
+    max_position_weight: float | None = None,
+    quote_client: MoomooOpenDClient | None = None,
+    trade_client: MoomooPaperTradeClient | None = None,
+    strategy: Strategy | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> None:
     """Run continuous monitoring loop for paper trading."""
     selected_symbols = symbols
@@ -157,26 +229,23 @@ def run_auto_monitor(
     paper_capital_input = capital if capital is not None else settings.initial_capital
     resolved_fx_rate = fx_jpy_per_usd if fx_jpy_per_usd is not None else settings.fx_jpy_per_usd
     paper_capital_usd = convert_capital_to_usd(paper_capital_input, settings.capital_currency, resolved_fx_rate)
-
-    from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
-
-    strategy = MonthlyMomentumRotationStrategy(
-        MonthlyMomentumRotationConfig(
-            lookback_days=settings.lookback_days,
-            trend_days=settings.trend_days,
-            top_n=settings.top_n,
-            skip_days=settings.skip_days,
-            rebalance_days=settings.rebalance_days,
-            min_hold_days=settings.min_hold_days,
-            volatility_lookback_days=settings.volatility_lookback_days,
-            max_volatility_percentile=settings.max_volatility_percentile,
-            relative_strength_lookback_days=settings.relative_strength_lookback_days,
-            fallback_asset_symbol=settings.fallback_asset_symbol,
-            fallback_allocation=settings.fallback_allocation,
-        )
+    resolved_max_position_weight = (
+        max_position_weight if max_position_weight is not None else settings.max_single_position_weight
     )
-    quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
-    trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port)
+
+    owns_quote_client = quote_client is None
+    owns_trade_client = trade_client is None
+    if owns_quote_client:
+        quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
+    if owns_trade_client:
+        try:
+            trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port)
+        except Exception:
+            if owns_quote_client:
+                quote_client.close()
+            raise
+    strategy = strategy or _build_monthly_strategy(settings)
+    sleep_fn = sleep_fn or sleep
     risk_state = RiskState()
 
     console.print(
@@ -194,7 +263,9 @@ def run_auto_monitor(
                 position_frame = trade_client.get_position_frame()
                 current_positions = _position_quantities(position_frame)
                 symbol_universe = list(dict.fromkeys([*selected_symbols, *current_positions.keys()]))
-                latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
+                historical_latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
+                latest_prices = _resolve_order_prices(quote_client, symbol_universe, historical_latest_prices)
+                order_price_frame = _overlay_latest_prices(price_frame, latest_prices)
                 account_value = trade_client.get_account_value()
                 market_state = _fetch_market_state(quote_client, benchmark_label)
                 market_open = _is_regular_market_open(market_state)
@@ -203,7 +274,7 @@ def run_auto_monitor(
                 if shock_reason:
                     logger.warning(f"Risk stop active - {shock_reason}")
                     console.print(f"{price_frame.index[-1].date()}: risk stop active - {shock_reason}")
-                    sleep(poll_seconds)
+                    sleep_fn(poll_seconds)
                     continue
 
                 drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct, settings.max_drawdown_reset_pct)
@@ -225,12 +296,17 @@ def run_auto_monitor(
                     else:
                         risk_state.peak_account_value = account_value
                         console.print(f"{price_frame.index[-1].date()}: drawdown recovered, resuming normal operations")
-                    sleep(poll_seconds)
+                    sleep_fn(poll_seconds)
                     continue
 
                 decision = strategy.decide(price_frame, price_frame.index[-1])
-                max_pos_weight = settings.max_single_position_weight
-                plan = build_paper_plan(price_frame, decision, paper_capital_usd, minimum_order_value=minimum_order_value, max_position_weight=max_pos_weight)
+                plan = build_paper_plan(
+                    order_price_frame,
+                    decision,
+                    paper_capital_usd,
+                    minimum_order_value=minimum_order_value,
+                    max_position_weight=resolved_max_position_weight,
+                )
                 instructions = build_paper_rebalance_orders(
                     plan,
                     current_positions=current_positions,
@@ -245,6 +321,8 @@ def run_auto_monitor(
                     session=Session.NONE if market_open else Session.ETH,
                     fill_outside_rth=not market_open,
                 )
+                instructions = _reprice_orders(instructions, latest_prices)
+                risk_orders = _reprice_orders(risk_orders, latest_prices)
 
                 render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
                 console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
@@ -264,17 +342,20 @@ def run_auto_monitor(
                     console.print(f"{price_frame.index[-1].date()}: no rebalance required; monitoring only.")
 
                 consecutive_failures = 0
-                sleep(poll_seconds)
+                sleep_fn(poll_seconds)
             except Exception as exc:
                 consecutive_failures += 1
                 wait_seconds = min(poll_seconds * (2 ** (consecutive_failures - 1)), poll_seconds * 8)
-                logger.error(f"auto-run cycle failed ({consecutive_failures}/{max_consecutive_failures}): {exc}")
+                logger.exception(f"auto-run cycle failed ({consecutive_failures}/{max_consecutive_failures}): {exc}")
                 console.print(f"auto-run cycle failed ({consecutive_failures}/{max_consecutive_failures}): {exc}")
                 if consecutive_failures >= max_consecutive_failures:
                     logger.error("auto-run stopped after repeated failures.")
                     console.print("auto-run stopped after repeated failures.")
                     break
-                sleep(wait_seconds)
+                sleep_fn(wait_seconds)
     finally:
-        trade_client.close()
-        quote_client.close()
+        if owns_trade_client:
+            trade_client.close()
+        if owns_quote_client:
+            quote_client.close()
+
