@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     take_profit_pct: float = 0.20
     transaction_cost_per_trade: float = 0.0
     transaction_cost_bps: float = 0.0
-    max_single_position_weight: float = 0.20
+    max_single_position_weight: float = 1.0
     fallback_asset_symbol: str | None = None
     fallback_allocation: float = 0.0
     volatility_lookback_days: int = 0
