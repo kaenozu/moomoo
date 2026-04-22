@@ -12,6 +12,9 @@ from collections.abc import Mapping
 
 import pandas as pd
 from moomoo import Session, TrdSide
+from moomoo_bot.quantities import (
+    round_quantity_toward_zero as _round_quantity_toward_zero,
+)
 
 from moomoo_bot.strategy.base import TradeDecision
 
@@ -65,6 +68,7 @@ def build_paper_plan(
     latest_prices = prices.loc[: decision.as_of].iloc[-1]
     allocations: list[PaperAllocation] = []
     allocated_cost = 0.0
+    total_weight = 0.0
 
     for symbol, weight in sorted(
         decision.target_weights.items(), key=lambda item: (-item[1], item[0])
@@ -76,18 +80,20 @@ def build_paper_plan(
         if price <= 0.0:
             raise ValueError(f"invalid price for {symbol}: {price}")
 
-        target_value = capital * weight
-        target_value = min(target_value, capital * max_position_weight)
+        remaining_weight_budget = max(0.0, 1.0 - total_weight)
+        capped_weight = min(weight, max_position_weight, remaining_weight_budget)
+        target_value = capital * capped_weight
         target_quantity = floor((target_value / price) * 1000.0) / 1000.0
         target_cost = target_quantity * price
         if target_cost < minimum_order_value:
             continue
 
         allocated_cost += target_cost
+        total_weight += capped_weight
         allocations.append(
             PaperAllocation(
                 symbol=symbol,
-                weight=weight,
+                weight=capped_weight,
                 price=price,
                 target_value=target_value,
                 target_quantity=target_quantity,
@@ -120,25 +126,29 @@ def build_paper_rebalance_orders(
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = normalize_order_quantity(allocation.target_quantity - current_qty)
-        if delta > 0.0:
+        delta = _round_quantity_toward_zero(allocation.target_quantity - current_qty)
+        if delta > 0:
+            # Moomoo paper trading rejects fractional buy quantities.
+            buy_qty = float(floor(delta))
+            if buy_qty < 1.0:
+                continue
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.BUY,
-                    quantity=delta,
+                    quantity=buy_qty,
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
                     fill_outside_rth=not market_open,
                 )
             )
-        elif delta < 0.0:
+        elif delta < 0:
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.SELL,
-                    quantity=abs(delta),
+                    quantity=float(-delta),
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
@@ -149,8 +159,8 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = normalize_order_quantity(float(current_qty))
-        if sell_qty > 0.0:
+        sell_qty = _round_quantity_toward_zero(float(current_qty))
+        if sell_qty > 0:
             if symbol not in prices:
                 raise ValueError(
                     f"missing latest price for liquidation symbol {symbol}"
@@ -159,7 +169,7 @@ def build_paper_rebalance_orders(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=sell_qty,
+                    quantity=float(sell_qty),
                     price=float(prices[symbol]),
                     reason=f"{plan.reason}:liquidate",
                     session=Session.NONE if market_open else Session.ETH,
@@ -175,8 +185,3 @@ def build_paper_rebalance_orders(
             instruction.symbol,
         ),
     )
-
-
-def normalize_order_quantity(quantity: float) -> float:
-    rounded = round(float(quantity), 3)
-    return rounded if abs(rounded) > 0.0 else 0.0
