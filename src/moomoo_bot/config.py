@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     market_shock_drop_pct: float = 0.05
     stop_loss_pct: float = 0.10
     take_profit_pct: float = 0.20
+    history_retries: int = 3
+    history_retry_delay_seconds: float = 0.5
+    quote_retries: int = 3
+    quote_retry_delay_seconds: float = 0.5
 
     @property
     def symbol_list(self) -> list[str]:

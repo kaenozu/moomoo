@@ -15,11 +15,22 @@ from typing import Protocol
 import pandas as pd
 from moomoo import AuType, KL_FIELD, KLType, OpenQuoteContext, RET_OK
 
+from moomoo_bot.config import get_settings
 
-_HISTORY_REQUEST_RETRIES = 3
-_HISTORY_REQUEST_RETRY_DELAY_SECONDS = 0.5
-_QUOTE_REQUEST_RETRIES = 3
-_QUOTE_REQUEST_RETRY_DELAY_SECONDS = 0.5
+
+def _get_retry_settings() -> tuple[int, float, int, float]:
+    """Get retry settings from config.
+
+    Returns:
+        Tuple of (history_retries, history_delay, quote_retries, quote_delay).
+    """
+    settings = get_settings()
+    return (
+        settings.history_retries,
+        settings.history_retry_delay_seconds,
+        settings.quote_retries,
+        settings.quote_retry_delay_seconds,
+    )
 
 
 class QuoteContext(Protocol):
@@ -75,15 +86,16 @@ class MoomooOpenDClient:
         if self.quote_context is None:
             raise RuntimeError("OpenD quote context is not initialized")
 
-        for attempt in range(1, _QUOTE_REQUEST_RETRIES + 1):
+        _, _, quote_retries, quote_delay = _get_retry_settings()
+        for attempt in range(1, quote_retries + 1):
             ret, data = fetcher(list(code_list))
             if ret == RET_OK:
                 if not isinstance(data, pd.DataFrame):
                     raise RuntimeError(f"{label.title()} did not return a DataFrame")
                 return data
-            if attempt == _QUOTE_REQUEST_RETRIES or not _is_transient_quote_error(data):
+            if attempt == quote_retries or not _is_transient_quote_error(data):
                 raise RuntimeError(f"Failed to fetch {label}: {data}")
-            time.sleep(_QUOTE_REQUEST_RETRY_DELAY_SECONDS * attempt)
+            time.sleep(quote_delay * attempt)
         raise RuntimeError(f"Failed to fetch {label}: exhausted retries")
 
     def fetch_history(
@@ -99,8 +111,9 @@ class MoomooOpenDClient:
         pages: list[pd.DataFrame] = []
         page_req_key: bytes | None = None
 
+        history_retries, history_delay, _, _ = _get_retry_settings()
         while True:
-            for attempt in range(1, _HISTORY_REQUEST_RETRIES + 1):
+            for attempt in range(1, history_retries + 1):
                 ret, data, next_page_req_key = self.quote_context.request_history_kline(
                     code,
                     start=start,
@@ -115,9 +128,9 @@ class MoomooOpenDClient:
                 if ret == RET_OK:
                     page_req_key = next_page_req_key
                     break
-                if attempt == _HISTORY_REQUEST_RETRIES or not _is_transient_history_error(data):
+                if attempt == history_retries or not _is_transient_history_error(data):
                     raise RuntimeError(f"Failed to fetch historical candlesticks for {code}: {data}")
-                time.sleep(_HISTORY_REQUEST_RETRY_DELAY_SECONDS * attempt)
+                time.sleep(history_delay * attempt)
             if isinstance(data, pd.DataFrame) and not data.empty:
                 pages.append(data)
             if page_req_key is None:

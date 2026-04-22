@@ -10,6 +10,7 @@ import pandas as pd
 from moomoo import Session, TrdEnv
 
 from moomoo_bot.broker import MoomooOpenDClient
+from moomoo_bot.cli_render import console
 from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
 
 
@@ -121,7 +122,6 @@ def submit_orders_with_duplicate_guard(trade_client, instructions, mode_label: s
     for instruction in instructions:
         matching_order = get_matching_active_order(trade_client, instruction)
         if matching_order is not None:
-            from moomoo_bot.cli_render import console
             console.print(
                 f"Skipping duplicate {mode_label} order for {instruction.symbol} qty={instruction.quantity:.3f} "
                 f"price={instruction.price:.2f} order_id={matching_order.get('order_id')} "

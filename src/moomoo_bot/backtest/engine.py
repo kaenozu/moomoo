@@ -82,7 +82,7 @@ def run_backtest(
         raise ValueError("benchmark must not be empty")
 
     prices = prices.sort_index()
-    benchmark = benchmark.sort_index().reindex(prices.index).ffill().bfill()
+    benchmark = benchmark.sort_index().reindex(prices.index).ffill()
     if benchmark.isna().any():
         raise ValueError("benchmark contains missing values after alignment")
 
@@ -163,7 +163,9 @@ def sharpe_ratio(returns: pd.Series) -> float:
     stdev = float(returns.std(ddof=0))
     if stdev == 0.0:
         return 0.0
-    return float((returns.mean() / stdev) * sqrt(252))
+    risk_free_rate: float = 0.0
+    excess_returns = returns.mean() - risk_free_rate / 252
+    return float((excess_returns / stdev) * sqrt(252))
 
 
 def max_drawdown(curve: pd.Series) -> float:

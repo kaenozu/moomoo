@@ -116,8 +116,8 @@ def build_paper_rebalance_orders(
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = _normalize_order_quantity(allocation.target_quantity - current_qty)
-        if delta > 0.0:
+        delta = allocation.target_quantity - current_qty
+        if delta > 0.001:
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
@@ -129,12 +129,12 @@ def build_paper_rebalance_orders(
                     fill_outside_rth=not market_open,
                 )
             )
-        elif delta < 0.0:
+        elif delta < -0.001:
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.SELL,
-                    quantity=abs(delta),
+                    quantity=-delta,
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
@@ -145,8 +145,8 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = _normalize_order_quantity(float(current_qty))
-        if sell_qty > 0.0:
+        sell_qty = float(current_qty)
+        if sell_qty > 0.001:
             if symbol not in prices:
                 raise ValueError(f"missing latest price for liquidation symbol {symbol}")
             instructions.append(
@@ -171,7 +171,12 @@ def build_paper_rebalance_orders(
     )
 
 
-def _normalize_order_quantity(quantity: float) -> float:
+def _round_down_to_integer_signed(quantity: float) -> float:
+    """Round towards zero (floor for positive, ceil for negative), then to integer.
+
+    Preserves sign: positive values become 0, 1, 2, ... negative values become 0, -1, -2, ...
+    Used for order quantities where sign direction matters.
+    """
     signed_quantity = float(quantity)
     if signed_quantity > 0.0:
         normalized_quantity = floor(signed_quantity)

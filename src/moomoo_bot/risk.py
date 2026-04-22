@@ -77,7 +77,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = _normalize_order_quantity(quantity)
+        sell_qty = _round_down_to_integer(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -116,7 +116,7 @@ def build_stop_loss_take_profit_orders(
         quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
         if quantity is None or quantity <= 0.0:
             continue
-        quantity = _normalize_order_quantity(quantity)
+        quantity = _round_down_to_integer(quantity)
         if quantity <= 0.0:
             continue
 
@@ -180,6 +180,10 @@ def _extract_float(row: pd.Series, fields: tuple[str, ...]) -> float | None:
     return None
 
 
-def _normalize_order_quantity(quantity: float) -> float:
+def _round_down_to_integer(quantity: float) -> float:
+    """Round towards zero, then to integer, always returns non-negative.
+
+    Used for position quantities where sign doesn't matter (always selling).
+    """
     normalized_quantity = floor(abs(float(quantity)))
     return float(normalized_quantity) if normalized_quantity > 0 else 0.0

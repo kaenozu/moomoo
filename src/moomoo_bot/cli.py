@@ -1,7 +1,7 @@
 """CLI command module.
 
 Purpose: Typer application entrypoint and command implementations.
-Related: cli_commands.py, cli_helpers.py, cli_render.py.
+Related: cli_commands.py, cli_helpers.py, cli_render.py, orchestrator.py.
 """
 
 from __future__ import annotations
@@ -9,25 +9,19 @@ from __future__ import annotations
 from pathlib import Path
 from time import sleep
 
-import pandas as pd
 import typer
-from moomoo import Session, TrdEnv
+from moomoo import TrdEnv
 from rich.table import Table
 
 from moomoo_bot.backtest import make_demo_prices, run_backtest
 from moomoo_bot.broker import MoomooOpenDClient
-from moomoo_bot.broker.paper import MoomooPaperTradeClient
 from moomoo_bot.cli_helpers import (
     build_monthly_strategy as _build_monthly_strategy,
     fetch_market_state as _fetch_market_state,
-    is_regular_market_open as _is_regular_market_open,
     load_benchmark_series as _load_benchmark_series,
     load_price_frame as _load_price_frame,
     parse_symbols as _parse_symbols,
     parse_weights as _parse_weights,
-    position_quantities as _position_quantities,
-    submit_orders_with_duplicate_guard as _submit_orders_with_duplicate_guard,
-    trade_mode_label as _trade_mode_label,
 )
 from moomoo_bot.cli_render import (
     console,
@@ -43,6 +37,8 @@ from moomoo_bot.cli_render import (
 )
 from moomoo_bot.config import get_settings
 from moomoo_bot.money import convert_capital_to_usd
+from moomoo_bot.broker.paper import MoomooPaperTradeClient
+from moomoo_bot.orchestrator import run_auto_monitor, run_one_shot_trade
 from moomoo_bot.paper import PaperPlan, build_paper_plan, build_paper_rebalance_orders
 from moomoo_bot.risk import (
     RiskState,
@@ -251,11 +247,11 @@ def paper_run(
 ) -> None:
     settings = get_settings()
     _require_paper_mode(settings, "paper-run")
-    _run_one_shot_trade(
+    run_one_shot_trade(
         settings=settings,
         trade_env=TrdEnv.SIMULATE,
-        symbols=symbols,
-        benchmark_symbol=benchmark_symbol,
+        symbols=_parse_symbols(symbols) or settings.symbol_list,
+        benchmark_symbol=benchmark_symbol or settings.benchmark_symbol,
         history_days=history_days,
         capital=capital,
         fx_jpy_per_usd=fx_jpy_per_usd,
@@ -274,11 +270,11 @@ def paper_trade(
 ) -> None:
     settings = get_settings()
     _require_paper_mode(settings, "paper-trade")
-    _run_one_shot_trade(
+    run_one_shot_trade(
         settings=settings,
         trade_env=TrdEnv.SIMULATE,
-        symbols=symbols,
-        benchmark_symbol=benchmark_symbol,
+        symbols=_parse_symbols(symbols) or settings.symbol_list,
+        benchmark_symbol=benchmark_symbol or settings.benchmark_symbol,
         history_days=history_days,
         capital=capital,
         fx_jpy_per_usd=fx_jpy_per_usd,
@@ -298,113 +294,17 @@ def live_trade(
 ) -> None:
     settings = get_settings()
     _require_live_mode(settings, "live-trade", confirm_live_trading)
-    _run_one_shot_trade(
+    run_one_shot_trade(
         settings=settings,
         trade_env=TrdEnv.REAL,
-        symbols=symbols,
-        benchmark_symbol=benchmark_symbol,
+        symbols=_parse_symbols(symbols) or settings.symbol_list,
+        benchmark_symbol=benchmark_symbol or settings.benchmark_symbol,
         history_days=history_days,
         capital=capital,
         fx_jpy_per_usd=fx_jpy_per_usd,
         minimum_order_value=minimum_order_value,
         max_position_weight=settings.live_max_position_weight,
     )
-
-
-def _run_one_shot_trade(
-    *,
-    settings,
-    trade_env: TrdEnv,
-    symbols: str | None,
-    benchmark_symbol: str | None,
-    history_days: int,
-    capital: float | None,
-    fx_jpy_per_usd: float | None,
-    minimum_order_value: float,
-    max_position_weight: float = 1.0,
-) -> None:
-    selected_symbols = _parse_symbols(symbols) or settings.symbol_list
-    benchmark_label = benchmark_symbol or settings.benchmark_symbol
-    paper_capital = capital if capital is not None else settings.initial_capital
-    resolved_fx_rate = fx_jpy_per_usd if fx_jpy_per_usd is not None else settings.fx_jpy_per_usd
-    paper_capital_usd = convert_capital_to_usd(paper_capital, settings.capital_currency, resolved_fx_rate)
-
-    quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
-    trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port, trd_env=trade_env)
-    mode_label = _trade_mode_label(trade_env)
-    try:
-        position_frame = trade_client.get_position_frame()
-        current_positions = _position_quantities(position_frame)
-        symbol_universe = list(dict.fromkeys([*selected_symbols, *current_positions.keys()]))
-        price_frame, benchmark_series = quote_client.fetch_price_panel(symbol_universe, benchmark_label, history_days=history_days)
-        latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
-        market_state = _fetch_market_state(quote_client, benchmark_label)
-        market_open = _is_regular_market_open(market_state)
-        account_value = trade_client.get_account_value() if capital is None else paper_capital_usd
-        risk_state = RiskState(peak_account_value=account_value)
-        shock_reason = detect_market_shock(benchmark_series, settings.market_shock_drop_pct)
-        if shock_reason:
-            console.print(f"Risk stop: {shock_reason}")
-            render_risk_orders([], current_positions, "Risk Stop Orders")
-            return
-
-        drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct)
-        if drawdown_reason:
-            liquidation_orders = build_liquidation_orders(current_positions, latest_prices, drawdown_reason)
-            render_paper_plan(
-                PaperPlan(as_of=price_frame.index[-1], capital=account_value, reason=drawdown_reason, allocations=[], cash_remaining=account_value),
-                benchmark_label,
-                ", ".join(symbol_universe),
-                benchmark_series,
-            )
-            if capital is None:
-                console.print(f"Capital input: {account_value:,.2f} USD (from {mode_label} account)")
-            else:
-                console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
-                console.print(f"Capital used for sizing: {account_value:,.2f} USD")
-            render_risk_orders(liquidation_orders, current_positions, "Risk Stop Orders")
-            console.print(f"Submitting {mode_label} risk stop liquidation orders...")
-            _submit_orders_with_duplicate_guard(trade_client, liquidation_orders, mode_label, render_order_response)
-            return
-
-        strategy = _build_monthly_strategy(settings)
-        decision = strategy.decide(price_frame, price_frame.index[-1])
-        plan = build_paper_plan(price_frame, decision, account_value, minimum_order_value=minimum_order_value, max_position_weight=max_position_weight)
-        instructions = build_paper_rebalance_orders(plan, current_positions=current_positions, latest_prices=latest_prices, market_open=market_open)
-        risk_orders = build_stop_loss_take_profit_orders(position_frame, latest_prices, settings.stop_loss_pct, settings.take_profit_pct)
-
-        if risk_orders:
-            render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, risk_orders)
-            if capital is None:
-                console.print(f"Capital input: {account_value:,.2f} USD (from {mode_label} account)")
-            else:
-                console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
-                console.print(f"Capital used for sizing: {account_value:,.2f} USD")
-            if not market_open:
-                console.print(f"Market state: {market_state}; buy orders will use ETH session.")
-            render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
-            console.print(f"Submitting {mode_label} risk exit orders...")
-            _submit_orders_with_duplicate_guard(trade_client, risk_orders, mode_label, render_order_response)
-            return
-
-        render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
-        if capital is None:
-            console.print(f"Capital input: {account_value:,.2f} USD (from {mode_label} account)")
-        else:
-            console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
-            console.print(f"Capital used for sizing: {account_value:,.2f} USD")
-        if not market_open:
-            console.print(f"Market state: {market_state}; buy orders will use ETH session.")
-
-        if not instructions:
-            console.print("No paper orders were required.")
-            return
-
-        console.print(f"Submitting {mode_label} orders...")
-        _submit_orders_with_duplicate_guard(trade_client, instructions, mode_label, render_order_response)
-    finally:
-        trade_client.close()
-        quote_client.close()
 
 
 @app.command()
@@ -420,112 +320,17 @@ def auto_run(
 ) -> None:
     settings = get_settings()
     _require_paper_mode(settings, "auto-run")
-
-    selected_symbols = _parse_symbols(symbols) or settings.symbol_list
-    benchmark_label = benchmark_symbol or settings.benchmark_symbol
-    paper_capital_input = capital if capital is not None else settings.initial_capital
-    resolved_fx_rate = fx_jpy_per_usd if fx_jpy_per_usd is not None else settings.fx_jpy_per_usd
-    paper_capital_usd = convert_capital_to_usd(paper_capital_input, settings.capital_currency, resolved_fx_rate)
-    strategy = _build_monthly_strategy(settings)
-    quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
-    trade_client = MoomooPaperTradeClient(host=settings.opend_host, port=settings.opend_port)
-    risk_state = RiskState()
-
-    console.print(
-        f"Starting auto-run monitor for {', '.join(selected_symbols)} vs {benchmark_label}; "
-        f"polling every {poll_seconds} seconds."
+    run_auto_monitor(
+        settings=settings,
+        symbols=_parse_symbols(symbols) or settings.symbol_list,
+        benchmark_symbol=benchmark_symbol or settings.benchmark_symbol,
+        history_days=history_days,
+        capital=capital,
+        fx_jpy_per_usd=fx_jpy_per_usd,
+        minimum_order_value=minimum_order_value,
+        poll_seconds=poll_seconds,
+        max_consecutive_failures=max_consecutive_failures,
     )
-    console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
-    console.print(f"Capital used for sizing: {paper_capital_usd:,.2f} USD")
-
-    try:
-        consecutive_failures = 0
-        while True:
-            try:
-                price_frame, benchmark_series = quote_client.fetch_price_panel(selected_symbols, benchmark_label, history_days=history_days)
-                position_frame = trade_client.get_position_frame()
-                current_positions = _position_quantities(position_frame)
-                symbol_universe = list(dict.fromkeys([*selected_symbols, *current_positions.keys()]))
-                latest_prices = {symbol: float(price_frame.iloc[-1][symbol]) for symbol in price_frame.columns}
-                account_value = trade_client.get_account_value()
-                market_state = _fetch_market_state(quote_client, benchmark_label)
-                market_open = _is_regular_market_open(market_state)
-
-                shock_reason = detect_market_shock(benchmark_series, settings.market_shock_drop_pct)
-                if shock_reason:
-                    console.print(f"{price_frame.index[-1].date()}: risk stop active - {shock_reason}")
-                    sleep(poll_seconds)
-                    continue
-
-                drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct)
-                if drawdown_reason:
-                    liquidation_orders = build_liquidation_orders(
-                        current_positions,
-                        latest_prices,
-                        drawdown_reason,
-                        session=Session.NONE if market_open else Session.ETH,
-                        fill_outside_rth=not market_open,
-                    )
-                    render_risk_orders(liquidation_orders, current_positions, "Risk Stop Orders")
-                    if liquidation_orders:
-                        console.print("Submitting risk stop liquidation orders...")
-                        _submit_orders_with_duplicate_guard(trade_client, liquidation_orders, "paper", render_order_response)
-                    console.print(f"{price_frame.index[-1].date()}: trading halted - {drawdown_reason}")
-                    break
-
-                decision = strategy.decide(price_frame, price_frame.index[-1])
-                plan = build_paper_plan(price_frame, decision, paper_capital_usd, minimum_order_value=minimum_order_value)
-                instructions = build_paper_rebalance_orders(
-                    plan,
-                    current_positions=current_positions,
-                    latest_prices=latest_prices,
-                    market_open=market_open,
-                )
-                risk_orders = build_stop_loss_take_profit_orders(
-                    position_frame,
-                    latest_prices,
-                    settings.stop_loss_pct,
-                    settings.take_profit_pct,
-                    session=Session.NONE if market_open else Session.ETH,
-                    fill_outside_rth=not market_open,
-                )
-
-                if risk_orders:
-                    render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, risk_orders)
-                    console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
-                    console.print(f"Capital used for sizing: {plan.capital:,.2f} USD")
-                    if not market_open:
-                        console.print(f"Market state: {market_state}; buy orders will use ETH session.")
-                    render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
-                    console.print("Submitting risk exit orders...")
-                    _submit_orders_with_duplicate_guard(trade_client, risk_orders, "paper", render_order_response)
-                    sleep(poll_seconds)
-                    continue
-
-                if instructions:
-                    render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
-                    console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
-                    console.print(f"Capital used for sizing: {plan.capital:,.2f} USD")
-                    if not market_open:
-                        console.print(f"Market state: {market_state}; buy orders will use ETH session.")
-                    console.print("Submitting paper orders...")
-                    _submit_orders_with_duplicate_guard(trade_client, instructions, "paper", render_order_response)
-                else:
-                    console.print(f"{price_frame.index[-1].date()}: no rebalance required; monitoring only.")
-
-                consecutive_failures = 0
-                sleep(poll_seconds)
-            except Exception as exc:
-                consecutive_failures += 1
-                wait_seconds = min(poll_seconds * (2 ** (consecutive_failures - 1)), poll_seconds * 8)
-                console.print(f"auto-run cycle failed ({consecutive_failures}/{max_consecutive_failures}): {exc}")
-                if consecutive_failures >= max_consecutive_failures:
-                    console.print("auto-run stopped after repeated failures.")
-                    break
-                sleep(wait_seconds)
-    finally:
-        trade_client.close()
-        quote_client.close()
 
 
 if __name__ == "__main__":
