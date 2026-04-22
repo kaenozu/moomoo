@@ -76,6 +76,11 @@ def build_monthly_strategy(settings, min_hold_days: int | None = None):
             skip_days=settings.skip_days,
             rebalance_days=settings.rebalance_days,
             min_hold_days=min_hold_days if min_hold_days is not None else settings.min_hold_days,
+            volatility_lookback_days=getattr(settings, "volatility_lookback_days", 0),
+            max_volatility_percentile=getattr(settings, "max_volatility_percentile", 1.0),
+            relative_strength_lookback_days=getattr(settings, "relative_strength_lookback_days", 0),
+            fallback_asset_symbol=getattr(settings, "fallback_asset_symbol", None),
+            fallback_allocation=getattr(settings, "fallback_allocation", 0.0),
         )
     )
 

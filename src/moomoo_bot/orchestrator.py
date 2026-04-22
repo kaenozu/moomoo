@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from time import sleep
 
-import pandas as pd
 from moomoo import Session, TrdEnv
 
 from moomoo_bot.broker import MoomooOpenDClient
@@ -103,6 +102,11 @@ def run_one_shot_trade(
                 skip_days=settings.skip_days,
                 rebalance_days=settings.rebalance_days,
                 min_hold_days=settings.min_hold_days,
+                volatility_lookback_days=getattr(settings, "volatility_lookback_days", 0),
+                max_volatility_percentile=getattr(settings, "max_volatility_percentile", 1.0),
+                relative_strength_lookback_days=getattr(settings, "relative_strength_lookback_days", 0),
+                fallback_asset_symbol=getattr(settings, "fallback_asset_symbol", None),
+                fallback_allocation=getattr(settings, "fallback_allocation", 0.0),
             )
         )
         decision = strategy.decide(price_frame, price_frame.index[-1])
@@ -173,6 +177,11 @@ def run_auto_monitor(
             skip_days=settings.skip_days,
             rebalance_days=settings.rebalance_days,
             min_hold_days=settings.min_hold_days,
+            volatility_lookback_days=getattr(settings, "volatility_lookback_days", 0),
+            max_volatility_percentile=getattr(settings, "max_volatility_percentile", 1.0),
+            relative_strength_lookback_days=getattr(settings, "relative_strength_lookback_days", 0),
+            fallback_asset_symbol=getattr(settings, "fallback_asset_symbol", None),
+            fallback_allocation=getattr(settings, "fallback_allocation", 0.0),
         )
     )
     quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
@@ -224,7 +233,8 @@ def run_auto_monitor(
                     break
 
                 decision = strategy.decide(price_frame, price_frame.index[-1])
-                plan = build_paper_plan(price_frame, decision, paper_capital_usd, minimum_order_value=minimum_order_value)
+                max_pos_weight = getattr(settings, "max_single_position_weight", 1.0)
+                plan = build_paper_plan(price_frame, decision, paper_capital_usd, minimum_order_value=minimum_order_value, max_position_weight=max_pos_weight)
                 instructions = build_paper_rebalance_orders(
                     plan,
                     current_positions=current_positions,

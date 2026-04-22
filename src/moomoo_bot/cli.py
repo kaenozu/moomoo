@@ -7,7 +7,6 @@ Related: cli_commands.py, cli_helpers.py, cli_render.py, orchestrator.py.
 from __future__ import annotations
 
 from pathlib import Path
-from time import sleep
 
 import typer
 from moomoo import TrdEnv
@@ -17,7 +16,6 @@ from moomoo_bot.backtest import make_demo_prices, run_backtest
 from moomoo_bot.broker import MoomooOpenDClient
 from moomoo_bot.cli_helpers import (
     build_monthly_strategy as _build_monthly_strategy,
-    fetch_market_state as _fetch_market_state,
     load_benchmark_series as _load_benchmark_series,
     load_price_frame as _load_price_frame,
     parse_symbols as _parse_symbols,
@@ -27,31 +25,18 @@ from moomoo_bot.cli_render import (
     console,
     format_percent,
     render_backtest_result,
-    render_order_response,
-    render_paper_plan,
-    render_paper_trade_plan,
     render_research_results,
-    render_risk_orders,
     render_satellite_results,
     render_snapshot,
 )
 from moomoo_bot.config import get_settings
-from moomoo_bot.money import convert_capital_to_usd
-from moomoo_bot.broker.paper import MoomooPaperTradeClient
 from moomoo_bot.orchestrator import run_auto_monitor, run_one_shot_trade
-from moomoo_bot.paper import PaperPlan, build_paper_plan, build_paper_rebalance_orders
-from moomoo_bot.risk import (
-    RiskState,
-    build_liquidation_orders,
-    build_stop_loss_take_profit_orders,
-    detect_market_shock,
-    update_drawdown_state,
-)
 from moomoo_bot.research import (
     default_momentum_search_configs,
     default_satellite_weights,
     search_momentum_candidates,
     search_satellite_candidates,
+    run_walk_forward_test,
 )
 
 app = typer.Typer(add_completion=False, help="Moomoo bot CLI")
@@ -232,6 +217,82 @@ def satellite(
         price_frame, benchmark_series = client.fetch_price_panel(selected_symbols, benchmark_label, history_days=history_days)
         results = search_satellite_candidates(price_frame, benchmark_series, configs=configs, satellite_weights=weights, split_ratio=split_ratio)
         render_satellite_results(results[:max_results], benchmark_label, ", ".join(selected_symbols), evaluated_count=len(results), config_count=len(configs), weight_count=len(weights))
+    finally:
+        client.close()
+
+
+@app.command()
+def walk_forward(
+    symbols: str | None = typer.Option(None, help="Comma-separated US symbols to search over."),
+    benchmark_symbol: str | None = typer.Option(None, help="Benchmark symbol used for core allocation."),
+    history_days: int = typer.Option(2200, min=504, help="Calendar lookback window for historical data."),
+    train_years: int = typer.Option(3, min=1, help="Years to use for training (optimization)."),
+    test_years: int = typer.Option(1, min=1, help="Years to use for testing (out-of-sample)."),
+) -> None:
+    settings = get_settings()
+    selected_symbols = _parse_symbols(symbols) or settings.symbol_list
+    benchmark_label = benchmark_symbol or settings.benchmark_symbol
+
+    client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
+    try:
+        price_frame, benchmark_series = client.fetch_price_panel(selected_symbols, benchmark_label, history_days=history_days)
+        if len(price_frame) < 504:
+            raise typer.BadParameter(f"Only {len(price_frame)} aligned rows were returned; need at least 504.")
+
+        results = run_walk_forward_test(
+            price_frame,
+            benchmark_series,
+            lambda: _build_monthly_strategy(settings),
+            train_years=train_years,
+            test_years=test_years,
+        )
+
+        if not results:
+            console.print("No walk-forward windows completed.")
+            return
+
+        table = Table(title=f"Walk-Forward Results ({train_years}y train / {test_years}y test)")
+        table.add_column("Window", style="cyan", no_wrap=True)
+        table.add_column("Start Date")
+        table.add_column("End Date")
+        table.add_column("Return")
+        table.add_column("CAGR")
+        table.add_column("Sharpe")
+        table.add_column("Max DD")
+        table.add_column("Trades")
+
+        for idx, result in enumerate(results):
+            start_date = result.equity_curve.index[0].strftime("%Y-%m-%d")
+            end_date = result.equity_curve.index[-1].strftime("%Y-%m-%d")
+            table.add_row(
+                str(idx + 1),
+                start_date,
+                end_date,
+                format_percent(result.total_return),
+                format_percent(result.cagr),
+                f"{result.sharpe:.2f}",
+                format_percent(result.max_drawdown),
+                str(result.trade_count),
+            )
+
+        console.print(table)
+
+        avg_return = sum(r.total_return for r in results) / len(results)
+        avg_cagr = sum(r.cagr for r in results) / len(results)
+        avg_sharpe = sum(r.sharpe for r in results) / len(results)
+        avg_drawdown = sum(r.max_drawdown for r in results) / len(results)
+        total_trades = sum(r.trade_count for r in results)
+
+        summary = Table(title="Walk-Forward Summary")
+        summary.add_column("Metric", style="cyan")
+        summary.add_column("Average")
+        summary.add_row("Return", format_percent(avg_return))
+        summary.add_row("CAGR", format_percent(avg_cagr))
+        summary.add_row("Sharpe", f"{avg_sharpe:.2f}")
+        summary.add_row("Max Drawdown", format_percent(avg_drawdown))
+        summary.add_row("Total Trades", str(total_trades))
+        console.print(summary)
+
     finally:
         client.close()
 
