@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     market_shock_drop_pct: float = 0.05
     stop_loss_pct: float = 0.10
     take_profit_pct: float = 0.20
+    transaction_cost_per_trade: float = 0.0
+    transaction_cost_bps: float = 0.0
+    max_single_position_weight: float = 0.20
+    fallback_asset_symbol: str | None = None
     history_retries: int = 3
     history_retry_delay_seconds: float = 0.5
     quote_retries: int = 3

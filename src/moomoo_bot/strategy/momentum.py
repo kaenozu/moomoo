@@ -60,6 +60,11 @@ class MonthlyMomentumRotationConfig:
     skip_days: int = 21
     rebalance_days: int = 21
     min_hold_days: int = 0
+    volatility_lookback_days: int = 0
+    max_volatility_percentile: float = 1.0
+    relative_strength_lookback_days: int = 0
+    fallback_asset_symbol: str | None = None
+    fallback_allocation: float = 0.0
 
 
 class MonthlyMomentumRotationStrategy:
@@ -76,9 +81,37 @@ class MonthlyMomentumRotationStrategy:
         self._entry_index: dict[str, int] = {}
         self._last_rebalance_length = -1
 
+    def _calculate_volatility(self, frame: pd.DataFrame) -> pd.Series:
+        """Calculate rolling volatility for each symbol."""
+        if self.config.volatility_lookback_days < 2:
+            return pd.Series(dtype=float)
+        returns = frame.pct_change().dropna()
+        if len(returns) < self.config.volatility_lookback_days:
+            return pd.Series(dtype=float)
+        volatility = returns.tail(self.config.volatility_lookback_days).std() * (252 ** 0.5)
+        return volatility
+
+    def _calculate_relative_strength(self, frame: pd.DataFrame) -> pd.Series:
+        """Calculate relative strength (momentum relative to universe average)."""
+        if self.config.relative_strength_lookback_days < 2:
+            return pd.Series(dtype=float)
+        if len(frame) < self.config.relative_strength_lookback_days:
+            return pd.Series(dtype=float)
+        reference_idx = -self.config.relative_strength_lookback_days
+        reference_prices = frame.iloc[reference_idx]
+        current_prices = frame.iloc[-1]
+        relative_strength = current_prices.div(reference_prices).sub(1.0)
+        universe_avg = relative_strength.mean()
+        return relative_strength.sub(universe_avg)
+
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         frame = prices.loc[:as_of].dropna(how="all")
-        required_rows = max(self.config.lookback_days + self.config.skip_days + 1, self.config.trend_days + 1)
+        required_rows = self.config.lookback_days + self.config.skip_days + 1
+        required_rows = max(required_rows, self.config.trend_days + 1)
+        if self.config.volatility_lookback_days > 0:
+            required_rows = max(required_rows, self.config.volatility_lookback_days + 1)
+        if self.config.relative_strength_lookback_days > 0:
+            required_rows = max(required_rows, self.config.relative_strength_lookback_days + 1)
         if len(frame) < required_rows:
             return TradeDecision(as_of=as_of, target_weights={}, reason="insufficient_history")
 
@@ -89,7 +122,19 @@ class MonthlyMomentumRotationStrategy:
             reference = frame.iloc[-(self.config.lookback_days + self.config.skip_days + 1)]
             momentum = latest.div(reference).sub(1.0)
 
-            eligible = momentum[(latest > trend) & momentum.notna()].sort_values(ascending=False)
+            eligible = momentum[(latest > trend) & momentum.notna()]
+
+            volatility = self._calculate_volatility(frame)
+            if not volatility.empty and self.config.volatility_lookback_days > 0 and self.config.max_volatility_percentile < 1.0:
+                volatility_threshold = volatility.quantile(self.config.max_volatility_percentile)
+                eligible = eligible[volatility <= volatility_threshold]
+
+            relative_strength = self._calculate_relative_strength(frame)
+            if not relative_strength.empty and self.config.relative_strength_lookback_days > 0:
+                rs_threshold = relative_strength.quantile(0.5)
+                eligible = eligible[relative_strength >= rs_threshold]
+
+            eligible = eligible.sort_values(ascending=False)
             selected_symbols = eligible.head(self.config.top_n).index.tolist()
 
             if not selected_symbols:

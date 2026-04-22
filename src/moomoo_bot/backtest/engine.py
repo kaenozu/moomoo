@@ -19,6 +19,7 @@ class BacktestResult:
     equity_curve: pd.Series
     benchmark_curve: pd.Series
     trade_count: int
+    transaction_costs: float
     total_return: float
     benchmark_return: float
     cagr: float
@@ -39,6 +40,7 @@ class BacktestResult:
             "max_drawdown": self.max_drawdown,
             "outperformance": self.outperformance,
             "trade_count": float(self.trade_count),
+            "transaction_costs": self.transaction_costs,
         }
 
 
@@ -60,6 +62,7 @@ def blend_result_with_benchmark(strategy_result: BacktestResult, satellite_weigh
         equity_curve=blended_equity,
         benchmark_curve=strategy_result.benchmark_curve,
         trade_count=strategy_result.trade_count,
+        transaction_costs=strategy_result.transaction_costs,
         total_return=total_return,
         benchmark_return=benchmark_return,
         cagr=_annualized_return(blended_equity),
@@ -75,11 +78,17 @@ def run_backtest(
     prices: pd.DataFrame,
     benchmark: pd.Series,
     strategy: Strategy,
+    transaction_cost_per_trade: float = 0.0,
+    transaction_cost_bps: float = 0.0,
 ) -> BacktestResult:
     if prices.empty:
         raise ValueError("prices must not be empty")
     if benchmark.empty:
         raise ValueError("benchmark must not be empty")
+    if transaction_cost_per_trade < 0.0:
+        raise ValueError("transaction_cost_per_trade must not be negative")
+    if transaction_cost_bps < 0.0:
+        raise ValueError("transaction_cost_bps must not be negative")
 
     prices = prices.sort_index()
     benchmark = benchmark.sort_index().reindex(prices.index).ffill()
@@ -92,6 +101,7 @@ def run_backtest(
     benchmark_values = [1.0]
     trade_count = 0
     previous_weights: dict[str, float] = {}
+    transaction_costs_paid = 0.0
 
     dates = prices.index
     for index in range(1, len(dates)):
@@ -102,6 +112,9 @@ def run_backtest(
         if decision.target_weights != previous_weights:
             if decision.target_weights:
                 trade_count += 1
+                trade_cost = transaction_cost_per_trade + equity_values[-1] * (transaction_cost_bps / 10000.0)
+                transaction_costs_paid += trade_cost
+                equity_values[-1] -= trade_cost
             previous_weights = decision.target_weights
 
         next_returns = prices.loc[next_date].div(prices.loc[current_date]).sub(1.0)
@@ -132,6 +145,7 @@ def run_backtest(
         equity_curve=equity_curve,
         benchmark_curve=benchmark_curve,
         trade_count=trade_count,
+        transaction_costs=transaction_costs_paid,
         total_return=total_return,
         benchmark_return=benchmark_total_return,
         cagr=cagr,

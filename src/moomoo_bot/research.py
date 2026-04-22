@@ -258,6 +258,73 @@ def _blend_with_benchmark(strategy_result: BacktestResult, satellite_weight: flo
     return blend_result_with_benchmark(strategy_result, satellite_weight)
 
 
+def run_walk_forward_test(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    strategy_factory,
+    train_years: int = 3,
+    test_years: int = 1,
+    min_test_days: int = 60,
+) -> list[BacktestResult]:
+    """Run rolling walk-forward tests.
+
+    Args:
+        prices: Price DataFrame with symbols as columns.
+        benchmark: Benchmark series.
+        strategy_factory: Callable that returns a Strategy instance.
+        train_years: Years to use for training (optimization).
+        test_years: Years to use for testing (out-of-sample).
+        min_test_days: Minimum days required in test period.
+
+    Returns:
+        List of BacktestResult for each walk-forward window.
+    """
+    from moomoo_bot.backtest import run_backtest
+
+    if prices.empty:
+        raise ValueError("prices must not be empty")
+    if train_years < 1:
+        raise ValueError("train_years must be at least 1")
+    if test_years < 1:
+        raise ValueError("test_years must be at least 1")
+
+    dates = prices.sort_index().index
+    train_days = train_years * 252
+    test_days = test_years * 252
+
+    results: list[BacktestResult] = []
+    offset = 0
+
+    while True:
+        train_start_idx = offset
+        train_end_idx = offset + train_days
+        test_start_idx = train_end_idx
+        test_end_idx = test_start_idx + test_days
+
+        if train_end_idx >= len(dates) - min_test_days:
+            break
+        if test_end_idx > len(dates):
+            break
+
+        train_end_date = dates[train_end_idx - 1]
+        test_start_date = dates[test_start_idx]
+        test_end_date = dates[test_end_idx - 1]
+
+        test_prices = prices.loc[test_start_date:test_end_date]
+        test_benchmark = benchmark.loc[test_start_date:test_end_date]
+
+        if len(test_prices) < min_test_days:
+            break
+
+        strategy = strategy_factory()
+        result = run_backtest(test_prices, test_benchmark, strategy)
+        results.append(result)
+
+        offset += test_days
+
+    return results
+
+
 _annualized_return = annualized_return
 _sharpe_ratio = sharpe_ratio
 _max_drawdown = max_drawdown
