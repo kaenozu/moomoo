@@ -265,6 +265,7 @@ def run_walk_forward_test(
     train_years: int = 3,
     test_years: int = 1,
     min_test_days: int = 60,
+    required_rows: int = 300,
 ) -> list[BacktestResult]:
     """Run rolling walk-forward tests.
 
@@ -275,6 +276,7 @@ def run_walk_forward_test(
         train_years: Years to use for training (optimization).
         test_years: Years to use for testing (out-of-sample).
         min_test_days: Minimum days required in test period.
+        required_rows: Historical rows required for strategy warmup.
 
     Returns:
         List of BacktestResult for each walk-forward window.
@@ -296,28 +298,27 @@ def run_walk_forward_test(
     offset = 0
 
     while True:
-        train_start_idx = offset
-        train_end_idx = offset + train_days
-        test_start_idx = train_end_idx
+        test_start_idx = offset + train_days
         test_end_idx = test_start_idx + test_days
 
-        if train_end_idx >= len(dates) - min_test_days:
-            break
+        if test_start_idx - required_rows < 0:
+            offset += test_days
+            continue
         if test_end_idx > len(dates):
             break
 
-        train_end_date = dates[train_end_idx - 1]
-        test_start_date = dates[test_start_idx]
+        warmup_start_date = dates[test_start_idx - required_rows]
         test_end_date = dates[test_end_idx - 1]
 
-        test_prices = prices.loc[test_start_date:test_end_date]
-        test_benchmark = benchmark.loc[test_start_date:test_end_date]
+        warmup_test_prices = prices.loc[warmup_start_date:test_end_date]
+        warmup_test_benchmark = benchmark.loc[warmup_start_date:test_end_date]
 
-        if len(test_prices) < min_test_days:
-            break
+        if len(warmup_test_prices) < required_rows + min_test_days:
+            offset += test_days
+            continue
 
         strategy = strategy_factory()
-        result = run_backtest(test_prices, test_benchmark, strategy)
+        result = run_backtest(warmup_test_prices, warmup_test_benchmark, strategy)
         results.append(result)
 
         offset += test_days

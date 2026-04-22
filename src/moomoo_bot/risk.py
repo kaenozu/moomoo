@@ -45,13 +45,20 @@ def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | N
     return None
 
 
-def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_pct: float) -> str | None:
+def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_pct: float, reset_threshold_pct: float = 0.0) -> str | None:
     if account_value <= 0.0:
         account_value = 0.0
 
-    if state.peak_account_value is None or account_value > state.peak_account_value:
-        state.peak_account_value = account_value
-        return None
+    if state.halted and state.peak_account_value is not None and account_value > 0.0:
+        recovery_pct = (account_value - state.peak_account_value) / state.peak_account_value
+        if reset_threshold_pct > 0.0 and recovery_pct >= reset_threshold_pct:
+            state.halted = False
+            state.halted_reason = None
+
+    if not state.halted:
+        if state.peak_account_value is None or account_value > state.peak_account_value:
+            state.peak_account_value = account_value
+            return None
 
     peak = state.peak_account_value
     if peak is None or peak <= 0.0:

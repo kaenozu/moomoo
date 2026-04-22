@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     transaction_cost_bps: float = 0.0
     max_single_position_weight: float = 0.20
     fallback_asset_symbol: str | None = None
+    fallback_allocation: float = 0.0
+    volatility_lookback_days: int = 0
+    max_volatility_percentile: float = 1.0
+    relative_strength_lookback_days: int = 0
+    max_drawdown_reset_pct: float = 0.05
     history_retries: int = 3
     history_retry_delay_seconds: float = 0.5
     quote_retries: int = 3

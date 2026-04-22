@@ -137,16 +137,29 @@ class MonthlyMomentumRotationStrategy:
             eligible = eligible.sort_values(ascending=False)
             selected_symbols = eligible.head(self.config.top_n).index.tolist()
 
+            fallback_allocation = self.config.fallback_allocation
+            fallback_symbol = self.config.fallback_asset_symbol
+
             if not selected_symbols:
-                preserved = {}
-                if self.config.min_hold_days > 0:
-                    for symbol, weight in self._current_weights.items():
-                        entry_index = self._entry_index.get(symbol)
-                        if entry_index is not None and len(frame) - entry_index < self.config.min_hold_days:
-                            preserved[symbol] = weight
-                self._current_weights = preserved
-                self._entry_index = {symbol: self._entry_index[symbol] for symbol in preserved}
-                reason = "no_symbols_above_trend"
+                if fallback_symbol and fallback_allocation > 0:
+                    existing_weight = self._current_weights.get(fallback_symbol, 0.0)
+                    if existing_weight > 0:
+                        self._current_weights = {fallback_symbol: 1.0}
+                        self._entry_index = {fallback_symbol: self._entry_index.get(fallback_symbol, len(frame))}
+                    else:
+                        self._current_weights = {fallback_symbol: fallback_allocation}
+                        self._entry_index = {fallback_symbol: len(frame)}
+                    reason = f"fallback:{fallback_symbol}"
+                else:
+                    preserved = {}
+                    if self.config.min_hold_days > 0:
+                        for symbol, weight in self._current_weights.items():
+                            entry_index = self._entry_index.get(symbol)
+                            if entry_index is not None and len(frame) - entry_index < self.config.min_hold_days:
+                                preserved[symbol] = weight
+                    self._current_weights = preserved
+                    self._entry_index = {symbol: self._entry_index[symbol] for symbol in preserved}
+                    reason = "no_symbols_above_trend"
             else:
                 preserved: dict[str, float] = {}
                 if self.config.min_hold_days > 0:

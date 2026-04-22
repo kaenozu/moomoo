@@ -65,7 +65,7 @@ def run_one_shot_trade(
         market_state = _fetch_market_state(quote_client, benchmark_label)
         market_open = _is_regular_market_open(market_state)
         account_value = trade_client.get_account_value() if capital is None else paper_capital_usd
-        risk_state = RiskState(peak_account_value=account_value)
+        risk_state = RiskState()
         shock_reason = detect_market_shock(benchmark_series, settings.market_shock_drop_pct)
         if shock_reason:
             logger.warning(f"Risk stop: {shock_reason}")
@@ -102,31 +102,18 @@ def run_one_shot_trade(
                 skip_days=settings.skip_days,
                 rebalance_days=settings.rebalance_days,
                 min_hold_days=settings.min_hold_days,
-                volatility_lookback_days=getattr(settings, "volatility_lookback_days", 0),
-                max_volatility_percentile=getattr(settings, "max_volatility_percentile", 1.0),
-                relative_strength_lookback_days=getattr(settings, "relative_strength_lookback_days", 0),
-                fallback_asset_symbol=getattr(settings, "fallback_asset_symbol", None),
-                fallback_allocation=getattr(settings, "fallback_allocation", 0.0),
+                volatility_lookback_days=settings.volatility_lookback_days,
+                max_volatility_percentile=settings.max_volatility_percentile,
+                relative_strength_lookback_days=settings.relative_strength_lookback_days,
+                fallback_asset_symbol=settings.fallback_asset_symbol,
+                fallback_allocation=settings.fallback_allocation,
             )
         )
         decision = strategy.decide(price_frame, price_frame.index[-1])
-        plan = build_paper_plan(price_frame, decision, account_value, minimum_order_value=minimum_order_value, max_position_weight=max_position_weight)
+        max_pos_weight = settings.max_single_position_weight
+        plan = build_paper_plan(price_frame, decision, account_value, minimum_order_value=minimum_order_value, max_position_weight=max_pos_weight)
         instructions = build_paper_rebalance_orders(plan, current_positions=current_positions, latest_prices=latest_prices, market_open=market_open)
         risk_orders = build_stop_loss_take_profit_orders(position_frame, latest_prices, settings.stop_loss_pct, settings.take_profit_pct)
-
-        if risk_orders:
-            render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, risk_orders)
-            if capital is None:
-                console.print(f"Capital input: {account_value:,.2f} USD (from {mode_label} account)")
-            else:
-                console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
-                console.print(f"Capital used for sizing: {account_value:,.2f} USD")
-            if not market_open:
-                console.print(f"Market state: {market_state}; buy orders will use ETH session.")
-            render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
-            console.print(f"Submitting {mode_label} risk exit orders...")
-            _submit_orders_with_duplicate_guard(trade_client, risk_orders, mode_label, render_order_response)
-            return
 
         render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
         if capital is None:
@@ -137,12 +124,16 @@ def run_one_shot_trade(
         if not market_open:
             console.print(f"Market state: {market_state}; buy orders will use ETH session.")
 
-        if not instructions:
-            console.print("No paper orders were required.")
-            return
+        if risk_orders:
+            render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
+            console.print(f"Submitting {mode_label} risk exit orders...")
+            _submit_orders_with_duplicate_guard(trade_client, risk_orders, mode_label, render_order_response)
 
-        console.print(f"Submitting {mode_label} orders...")
-        _submit_orders_with_duplicate_guard(trade_client, instructions, mode_label, render_order_response)
+        if instructions:
+            console.print(f"Submitting {mode_label} orders...")
+            _submit_orders_with_duplicate_guard(trade_client, instructions, mode_label, render_order_response)
+        elif not risk_orders:
+            console.print("No paper orders were required.")
     finally:
         trade_client.close()
         quote_client.close()
@@ -177,11 +168,11 @@ def run_auto_monitor(
             skip_days=settings.skip_days,
             rebalance_days=settings.rebalance_days,
             min_hold_days=settings.min_hold_days,
-            volatility_lookback_days=getattr(settings, "volatility_lookback_days", 0),
-            max_volatility_percentile=getattr(settings, "max_volatility_percentile", 1.0),
-            relative_strength_lookback_days=getattr(settings, "relative_strength_lookback_days", 0),
-            fallback_asset_symbol=getattr(settings, "fallback_asset_symbol", None),
-            fallback_allocation=getattr(settings, "fallback_allocation", 0.0),
+            volatility_lookback_days=settings.volatility_lookback_days,
+            max_volatility_percentile=settings.max_volatility_percentile,
+            relative_strength_lookback_days=settings.relative_strength_lookback_days,
+            fallback_asset_symbol=settings.fallback_asset_symbol,
+            fallback_allocation=settings.fallback_allocation,
         )
     )
     quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
@@ -215,7 +206,7 @@ def run_auto_monitor(
                     sleep(poll_seconds)
                     continue
 
-                drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct)
+                drawdown_reason = update_drawdown_state(account_value, risk_state, settings.max_drawdown_pct, getattr(settings, "max_drawdown_reset_pct", 0.05))
                 if drawdown_reason:
                     liquidation_orders = build_liquidation_orders(
                         current_positions,
@@ -250,24 +241,18 @@ def run_auto_monitor(
                     fill_outside_rth=not market_open,
                 )
 
+                render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
+                console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
+                console.print(f"Capital used for sizing: {plan.capital:,.2f} USD")
+                if not market_open:
+                    console.print(f"Market state: {market_state}; buy orders will use ETH session.")
+
                 if risk_orders:
-                    render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, risk_orders)
-                    console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
-                    console.print(f"Capital used for sizing: {plan.capital:,.2f} USD")
-                    if not market_open:
-                        console.print(f"Market state: {market_state}; buy orders will use ETH session.")
                     render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
                     console.print("Submitting risk exit orders...")
                     _submit_orders_with_duplicate_guard(trade_client, risk_orders, "paper", render_order_response)
-                    sleep(poll_seconds)
-                    continue
 
                 if instructions:
-                    render_paper_trade_plan(plan, benchmark_label, ", ".join(symbol_universe), benchmark_series, current_positions, instructions)
-                    console.print(f"Capital input: {paper_capital_input:,.2f} {settings.capital_currency}")
-                    console.print(f"Capital used for sizing: {plan.capital:,.2f} USD")
-                    if not market_open:
-                        console.print(f"Market state: {market_state}; buy orders will use ETH session.")
                     console.print("Submitting paper orders...")
                     _submit_orders_with_duplicate_guard(trade_client, instructions, "paper", render_order_response)
                 else:
