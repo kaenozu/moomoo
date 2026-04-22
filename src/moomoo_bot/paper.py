@@ -149,24 +149,25 @@ def build_paper_rebalance_orders(
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
         delta = allocation.target_quantity - current_qty
-        if delta > 0.001:
+        delta = floor(delta)
+        if delta > 0:
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.BUY,
-                    quantity=delta,
+                    quantity=float(delta),
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
                     fill_outside_rth=not market_open,
                 )
             )
-        elif delta < -0.001:
+        elif delta < 0:
             instructions.append(
                 PaperOrderInstruction(
                     symbol=allocation.symbol,
                     side=TrdSide.SELL,
-                    quantity=-delta,
+                    quantity=float(-delta),
                     price=allocation.price,
                     reason=plan.reason,
                     session=Session.NONE if market_open else Session.ETH,
@@ -177,15 +178,15 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = float(current_qty)
-        if sell_qty > 0.001:
+        sell_qty = floor(float(current_qty))
+        if sell_qty > 0:
             if symbol not in prices:
                 raise ValueError(f"missing latest price for liquidation symbol {symbol}")
             instructions.append(
                 PaperOrderInstruction(
                     symbol=symbol,
                     side=TrdSide.SELL,
-                    quantity=sell_qty,
+                    quantity=float(sell_qty),
                     price=float(prices[symbol]),
                     reason=f"{plan.reason}:liquidate",
                     session=Session.NONE if market_open else Session.ETH,
