@@ -1,6 +1,7 @@
 .venv/
 .venv312/
 .vscode/
+*ExecutionPolicy*
 __pycache__/
 *.pyc
 *.egg-info/
