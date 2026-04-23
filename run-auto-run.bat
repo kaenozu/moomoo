@@ -10,14 +10,16 @@ set "POLL_SECONDS=%~2"
 set "HISTORY_DAYS=%~3"
 set "FX_JPY_PER_USD=%~4"
 
-set "HISTORY_DAYS=%~3"
-
 if "%HOST%"=="" set "HOST=127.0.0.1"
 if "%PORT%"=="" set "PORT=11111"
 if "%CAPITAL%"=="" set "CAPITAL=100000"
 if "%POLL_SECONDS%"=="" set "POLL_SECONDS=900"
 if "%HISTORY_DAYS%"=="" set "HISTORY_DAYS=2200"
 if "%CAPITAL_CURRENCY%"=="" set "CAPITAL_CURRENCY=JPY"
+
+echo WARNING: This will start auto-run monitoring with %CAPITAL% %CAPITAL_CURRENCY% input capital.
+echo If this is incorrect, press Ctrl+C now to cancel.
+timeout /t 3 /nobreak >nul 2>&1
 
 if not exist "%PYTHON%" (
     echo Python executable not found: %PYTHON%

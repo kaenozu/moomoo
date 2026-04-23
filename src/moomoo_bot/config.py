@@ -4,9 +4,11 @@ Purpose: Load and manage application settings from environment variables.
 Related: cli.py, risk.py.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,41 +22,46 @@ class Settings(BaseSettings):
     )
 
     opend_host: str = "127.0.0.1"
-    opend_port: int = 11111
+    opend_port: int = Field(default=11111, ge=1, le=65535)
     execution_mode: Literal["paper", "live"] = "paper"
     allow_live_trading: bool = False
-    live_max_position_weight: float = 0.35
+    live_max_position_weight: float = Field(default=0.35, ge=0.0, le=1.0)
     symbols: str = "US.AAPL,US.MSFT,US.NVDA,US.AMZN,US.META,US.GOOGL,US.AVGO,US.ORCL,US.AMD,US.TSLA,US.LLY,US.COST,US.JPM,US.V,US.HD"
     benchmark_symbol: str = "US.VT"
-    lookback_days: int = 252
-    trend_days: int = 252
-    top_n: int = 1
-    skip_days: int = 21
-    rebalance_days: int = 21
-    min_hold_days: int = 0
-    backtest_min_hold_days: int = 21
+    lookback_days: int = Field(default=252, ge=1)
+    trend_days: int = Field(default=252, ge=1)
+    top_n: int = Field(default=1, ge=1)
+    skip_days: int = Field(default=21, ge=0)
+    rebalance_days: int = Field(default=21, ge=1)
+    min_hold_days: int = Field(default=0, ge=0)
+    backtest_min_hold_days: int = Field(default=21, ge=0)
     backtest_satellite_weight: float = -1.0
-    backtest_top_results: int = 5
-    initial_capital: float = 100_000.0
+    backtest_top_results: int = Field(default=5, ge=1)
+    initial_capital: float = Field(default=100_000.0, gt=0.0)
     capital_currency: Literal["JPY", "USD"] = "JPY"
-    fx_jpy_per_usd: float = 150.0
-    max_drawdown_pct: float = 0.15
-    market_shock_drop_pct: float = 0.05
-    stop_loss_pct: float = 0.10
-    take_profit_pct: float = 0.20
-    transaction_cost_per_trade: float = 0.0
-    transaction_cost_bps: float = 0.0
-    max_single_position_weight: float = 1.0
+    fx_jpy_per_usd: float = Field(default=150.0, gt=0.0)
+    max_drawdown_pct: float = Field(default=0.15, ge=0.0, le=1.0)
+    market_shock_drop_pct: float = Field(default=0.05, ge=0.0, le=1.0)
+    stop_loss_pct: float = Field(default=0.10, ge=0.0, le=1.0)
+    take_profit_pct: float = Field(default=0.20, ge=0.0, le=1.0)
+    transaction_cost_per_trade: float = Field(default=0.0, ge=0.0)
+    transaction_cost_bps: float = Field(default=0.0, ge=0.0)
+    max_single_position_weight: float = Field(default=1.0, gt=0.0, le=1.0)
+    satellite_weight: float = Field(default=0.23, ge=0.0, le=1.0)
     fallback_asset_symbol: str | None = None
-    fallback_allocation: float = 0.0
-    volatility_lookback_days: int = 0
-    max_volatility_percentile: float = 1.0
-    relative_strength_lookback_days: int = 0
-    max_drawdown_reset_pct: float = 0.05
-    history_retries: int = 3
-    history_retry_delay_seconds: float = 0.5
-    quote_retries: int = 3
-    quote_retry_delay_seconds: float = 0.5
+    fallback_allocation: float = Field(default=0.0, ge=0.0, le=1.0)
+    volatility_lookback_days: int = Field(default=21, ge=1)
+    fractional_share_precision: float = Field(default=1000.0, gt=0.0)
+    target_volatility_pct: float = Field(default=0.15, gt=0.0)
+    max_volatility_percentile: float = Field(default=1.0, gt=0.0)
+    relative_strength_lookback_days: int = Field(default=0, ge=0)
+    max_drawdown_reset_pct: float = Field(default=0.05, ge=0.0, le=1.0)
+    daily_loss_limit_pct: float = Field(default=0.05, ge=0.0, le=1.0)
+    webhook_url: HttpUrl | None = None
+    history_retries: int = Field(default=3, ge=0)
+    history_retry_delay_seconds: float = Field(default=0.5, gt=0.0)
+    quote_retries: int = Field(default=3, ge=0)
+    quote_retry_delay_seconds: float = Field(default=0.5, gt=0.0)
 
     @property
     def symbol_list(self) -> list[str]:
@@ -68,3 +75,20 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def reload_settings() -> Settings:
+    """Clear settings cache and reload from environment."""
+    get_settings.cache_clear()
+    return get_settings()
+
+
+def check_settings_changed(last_mtime: float) -> tuple[bool, float]:
+    """Check if the .env file has changed since last_mtime."""
+    env_file = ".env"
+    if not os.path.exists(env_file):
+        return False, last_mtime
+    mtime = os.path.getmtime(env_file)
+    if mtime > last_mtime:
+        return True, mtime
+    return False, last_mtime

@@ -66,6 +66,10 @@ class MonthlyMomentumRotationConfig:
     skip_days: int = 21
     rebalance_days: int = 21
     min_hold_days: int = 0
+    fallback_asset_symbol: str | None = None
+    fallback_allocation: float = 0.0
+    inverse_volatility: bool = False
+    volatility_lookback_days: int = 22
 
 
 class MonthlyMomentumRotationStrategy:
@@ -130,11 +134,28 @@ class MonthlyMomentumRotationStrategy:
                             and len(frame) - entry_index < self.config.min_hold_days
                         ):
                             preserved[symbol] = weight
-                self._current_weights = preserved
+
+                # Phase 2: Fallback Asset
+                fallback_weights: dict[str, float] = {}
+                if (
+                    self.config.fallback_asset_symbol
+                    and self.config.fallback_allocation > 0.0
+                ):
+                    remaining_weight = max(0.0, 1.0 - sum(preserved.values()))
+                    if remaining_weight > 0.0:
+                        fb_share = min(
+                            remaining_weight, self.config.fallback_allocation
+                        )
+                        fallback_weights[self.config.fallback_asset_symbol] = fb_share
+
+                self._current_weights = {**preserved, **fallback_weights}
                 self._entry_index = {
-                    symbol: self._entry_index[symbol] for symbol in preserved
+                    symbol: self._entry_index.get(symbol, len(frame))
+                    for symbol in self._current_weights
                 }
                 reason = "no_symbols_above_trend"
+                if fallback_weights:
+                    reason += f":fallback_to:{self.config.fallback_asset_symbol}"
             else:
                 preserved: dict[str, float] = {}
                 if self.config.min_hold_days > 0:
@@ -153,8 +174,28 @@ class MonthlyMomentumRotationStrategy:
                 ]
                 new_weights: dict[str, float] = {}
                 if new_symbols and remaining_weight > 0.0:
-                    share = remaining_weight / len(new_symbols)
-                    new_weights = {symbol: share for symbol in new_symbols}
+                    # Phase 3: Inverse Volatility Weighting
+                    if self.config.inverse_volatility:
+                        vols: dict[str, float] = {}
+                        for sym in new_symbols:
+                            returns = (
+                                frame[sym]
+                                .tail(self.config.volatility_lookback_days)
+                                .pct_change()
+                                .dropna()
+                            )
+                            vol = returns.std()
+                            vols[sym] = vol if vol > 0 else 1.0
+
+                        inv_vols = {sym: 1.0 / v for sym, v in vols.items()}
+                        total_inv_vol = sum(inv_vols.values())
+                        new_weights = {
+                            sym: (inv_vols[sym] / total_inv_vol) * remaining_weight
+                            for sym in new_symbols
+                        }
+                    else:
+                        share = remaining_weight / len(new_symbols)
+                        new_weights = {symbol: share for symbol in new_symbols}
 
                 self._current_weights = {**preserved, **new_weights}
                 self._entry_index = {

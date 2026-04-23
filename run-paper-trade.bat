@@ -15,6 +15,10 @@ if "%CAPITAL%"=="" set "CAPITAL=100000"
 if "%HISTORY_DAYS%"=="" set "HISTORY_DAYS=2200"
 if "%CAPITAL_CURRENCY%"=="" set "CAPITAL_CURRENCY=JPY"
 
+echo WARNING: This will run paper trading with %CAPITAL% %CAPITAL_CURRENCY% input capital.
+echo If this is incorrect, press Ctrl+C now to cancel.
+timeout /t 3 /nobreak >nul 2>&1
+
 if not exist "%PYTHON%" (
     echo Python executable not found: %PYTHON%
     exit /b 1

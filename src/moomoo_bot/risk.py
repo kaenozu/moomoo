@@ -12,7 +12,8 @@ from dataclasses import dataclass
 import pandas as pd
 from moomoo import Session, TrdSide
 
-from moomoo_bot.paper import PaperOrderInstruction, normalize_order_quantity
+from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.quantities import round_quantity_toward_zero
 
 
 @dataclass
@@ -20,6 +21,7 @@ class RiskState:
     peak_account_value: float | None = None
     halted: bool = False
     halted_reason: str | None = None
+    drawdown_tier: int = 0
 
 
 def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | None:
@@ -45,28 +47,89 @@ def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | N
 
 
 def update_drawdown_state(
-    account_value: float, state: RiskState, max_drawdown_pct: float
+    account_value: float,
+    state: RiskState,
+    max_drawdown_pct: float,
+    max_drawdown_reset_pct: float = 0.0,
 ) -> str | None:
+    """Update drawdown state and manage tiers (Phase 2)."""
     if account_value <= 0.0:
         account_value = 0.0
 
+    # New peak found
     if state.peak_account_value is None or account_value > state.peak_account_value:
         state.peak_account_value = account_value
+        state.halted = False
+        state.halted_reason = None
+        state.drawdown_tier = 0
         return None
 
     peak = state.peak_account_value
-    if peak is None or peak <= 0.0:
+    if peak <= 0.0:
         return None
 
     drawdown_pct = (peak - account_value) / peak
-    if max_drawdown_pct > 0.0 and drawdown_pct >= max_drawdown_pct:
-        state.halted = True
-        state.halted_reason = (
-            f"max_drawdown: equity fell {drawdown_pct:.2%} from peak {peak:.2f} to {account_value:.2f} "
-            f"(threshold {-max_drawdown_pct:.2%})"
-        )
+
+    # Recovery logic
+    if state.halted:
+        # If recovered within reset threshold, unhalt
+        if (
+            max_drawdown_reset_pct > 0.0
+            and account_value >= peak * (1.0 - max_drawdown_reset_pct)
+        ):
+            state.halted = False
+            state.halted_reason = None
+            state.drawdown_tier = 0
+            return None
         return state.halted_reason
+
+    # Gradual de-risking logic (Tiered drawdown)
+    # Tier 0 -> Tier 1 (50% reduction) at 2/3 of max_drawdown_pct
+    tier1_threshold = max_drawdown_pct * 0.66
+    if state.drawdown_tier == 0 and drawdown_pct >= tier1_threshold:
+        state.drawdown_tier = 1
+        # We don't halt here, just signal to orchestrator to reduce positions
+
+    # Full halt at max_drawdown_pct
+    if drawdown_pct >= max_drawdown_pct:
+        state.halted = True
+        state.drawdown_tier = 2
+        state.halted_reason = f"max_drawdown:{drawdown_pct:.2%} from {peak:.0f}"
+        return state.halted_reason
+
     return None
+
+
+def detect_daily_loss_limit(
+    last_equity: float | None, current_equity: float, limit_pct: float
+) -> str | None:
+    """Detect if daily loss limit was breached."""
+    if last_equity is None or last_equity <= 0.0 or limit_pct <= 0.0:
+        return None
+
+    loss_pct = (last_equity - current_equity) / last_equity
+    if loss_pct >= limit_pct:
+        return f"daily_loss_limit:{loss_pct:.2%} limit:{limit_pct:.2%}"
+    return None
+
+
+def calculate_volatility_scalar(
+    prices: pd.Series, lookback: int, target_vol: float
+) -> float:
+    """Calculate position scalar based on target volatility."""
+    if lookback <= 1 or target_vol <= 0.0 or len(prices) < lookback:
+        return 1.0
+
+    returns = prices.pct_change().dropna().iloc[-lookback:]
+    if returns.empty:
+        return 1.0
+
+    realized_vol = returns.std() * (252**0.5)
+    if realized_vol <= 0.0:
+        return 1.0
+
+    scalar = target_vol / realized_vol
+    return min(1.0, scalar)
 
 
 def build_liquidation_orders(
@@ -78,7 +141,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = normalize_order_quantity(quantity)
+        sell_qty = round_quantity_toward_zero(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -119,7 +182,7 @@ def build_stop_loss_take_profit_orders(
         )
         if quantity is None or quantity <= 0.0:
             continue
-        quantity = normalize_order_quantity(quantity)
+        quantity = round_quantity_toward_zero(quantity)
         if quantity <= 0.0:
             continue
 
