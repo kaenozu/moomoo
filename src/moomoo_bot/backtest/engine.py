@@ -78,7 +78,9 @@ def blend_result_with_benchmark(
     )
 
     sortino = _sortino_ratio(blended_returns.iloc[1:])
-    calmar = _calmar_ratio(_annualized_return(blended_equity), _max_drawdown(blended_equity))
+    calmar = _calmar_ratio(
+        _annualized_return(blended_equity), _max_drawdown(blended_equity)
+    )
     max_dd_duration = _max_drawdown_duration_days(blended_equity)
 
     return BacktestResult(
@@ -142,7 +144,9 @@ def run_backtest(
         if decision.target_weights != previous_weights:
             if decision.target_weights:
                 trade_count += 1
-                trade_cost = transaction_cost_per_trade + equity_values[-1] * (transaction_cost_bps / 10000.0)
+                trade_cost = transaction_cost_per_trade + equity_values[-1] * (
+                    transaction_cost_bps / 10000.0
+                )
                 transaction_costs_paid += trade_cost
                 equity_values[-1] -= trade_cost
             previous_weights = decision.target_weights
@@ -238,6 +242,8 @@ def max_drawdown(curve: pd.Series) -> float:
 
 _annualized_return = annualized_return
 _sharpe_ratio = sharpe_ratio
+
+
 def sortino_ratio(returns: pd.Series) -> float:
     if len(returns) < 2:
         return 0.0
@@ -253,7 +259,7 @@ def sortino_ratio(returns: pd.Series) -> float:
 
 def calmar_ratio(cagr: float, max_drawdown: float) -> float:
     if abs(max_drawdown) < 1e-9:
-        return 0.0 if max_drawdown >= 0 else float('inf')
+        return 0.0 if max_drawdown >= 0 else float("inf")
     return float(cagr / abs(max_drawdown))
 
 
@@ -265,21 +271,12 @@ def max_drawdown_duration_days(curve: pd.Series) -> int:
     if not is_in_drawdown.any():
         return 0
 
-    # Find drawdown periods
-    periods: list[int] = []
-    current_length = 0
-    for val in is_in_drawdown:
-        if val:
-            current_length += 1
-        else:
-            if current_length > 0:
-                periods.append(current_length)
-                current_length = 0
-
-    if current_length > 0:
-        periods.append(current_length)
-
-    return max(periods) if periods else 0
+    groups = (is_in_drawdown != is_in_drawdown.shift()).cumsum()
+    return (
+        int(is_in_drawdown[is_in_drawdown].groupby(groups).size().max())
+        if is_in_drawdown.any()
+        else 0
+    )
 
 
 _annualized_return = annualized_return

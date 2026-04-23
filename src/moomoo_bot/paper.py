@@ -53,6 +53,7 @@ def build_paper_plan(
     capital: float,
     minimum_order_value: float = 5.0,
     max_position_weight: float = 1.0,
+    fractional_share_precision: float = 1000.0,
 ) -> PaperPlan:
     if prices.empty:
         raise ValueError("prices must not be empty")
@@ -79,7 +80,10 @@ def build_paper_plan(
 
         applied_weight = min(weight, max_position_weight)
         target_value = capital * applied_weight
-        target_quantity = floor((target_value / price) * 1000.0) / 1000.0
+        target_quantity = (
+            floor((target_value / price) * fractional_share_precision)
+            / fractional_share_precision
+        )
         target_cost = target_quantity * price
         if target_cost < minimum_order_value:
             continue
@@ -177,5 +181,3 @@ def build_paper_rebalance_orders(
             instruction.symbol,
         ),
     )
-
-

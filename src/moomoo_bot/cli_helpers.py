@@ -90,6 +90,7 @@ def build_monthly_strategy(
             inverse_volatility=inverse_volatility,
             fallback_asset_symbol=settings.fallback_asset_symbol,
             fallback_allocation=settings.fallback_allocation,
+            volatility_lookback_days=settings.volatility_lookback_days,
         )
     )
 
@@ -132,7 +133,11 @@ def submit_orders_with_duplicate_guard(
             from moomoo_bot.cli_render import console
             from moomoo_bot.exceptions import OrderRejectedError
 
-            if "Not enough" in str(exc) or "invalid" in str(exc).lower():
+            error_msg = str(exc).lower()
+            if isinstance(exc, OrderRejectedError) or any(
+                keyword in error_msg
+                for keyword in ["not enough", "insufficient", "invalid", "rejected"]
+            ):
                 console.print(
                     f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
                 )

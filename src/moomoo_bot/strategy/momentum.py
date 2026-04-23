@@ -69,6 +69,7 @@ class MonthlyMomentumRotationConfig:
     fallback_asset_symbol: str | None = None
     fallback_allocation: float = 0.0
     inverse_volatility: bool = False
+    volatility_lookback_days: int = 22
 
 
 class MonthlyMomentumRotationStrategy:
@@ -142,7 +143,9 @@ class MonthlyMomentumRotationStrategy:
                 ):
                     remaining_weight = max(0.0, 1.0 - sum(preserved.values()))
                     if remaining_weight > 0.0:
-                        fb_share = min(remaining_weight, self.config.fallback_allocation)
+                        fb_share = min(
+                            remaining_weight, self.config.fallback_allocation
+                        )
                         fallback_weights[self.config.fallback_asset_symbol] = fb_share
 
                 self._current_weights = {**preserved, **fallback_weights}
@@ -175,7 +178,12 @@ class MonthlyMomentumRotationStrategy:
                     if self.config.inverse_volatility:
                         vols: dict[str, float] = {}
                         for sym in new_symbols:
-                            returns = frame[sym].tail(22).pct_change().dropna()
+                            returns = (
+                                frame[sym]
+                                .tail(self.config.volatility_lookback_days)
+                                .pct_change()
+                                .dropna()
+                            )
                             vol = returns.std()
                             vols[sym] = vol if vol > 0 else 1.0
 

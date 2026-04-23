@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     fallback_asset_symbol: str | None = None
     fallback_allocation: float = Field(default=0.0, ge=0.0, le=1.0)
     volatility_lookback_days: int = Field(default=21, ge=1)
+    fractional_share_precision: float = Field(default=1000.0, gt=0.0)
     target_volatility_pct: float = Field(default=0.15, gt=0.0)
     max_volatility_percentile: float = Field(default=1.0, gt=0.0)
     relative_strength_lookback_days: int = Field(default=0, ge=0)

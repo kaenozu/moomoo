@@ -66,7 +66,9 @@ class HealthCheckServer:
         self.port = port
         self.server: HTTPServer | None = None
         self.thread: Thread | None = None
-        self._status = HealthStatus(is_healthy=True, timestamp=datetime.now(timezone.utc).isoformat())
+        self._status = HealthStatus(
+            is_healthy=True, timestamp=datetime.now(timezone.utc).isoformat()
+        )
         self._start_time = datetime.now(timezone.utc)
 
     def update_status(
@@ -84,13 +86,17 @@ class HealthCheckServer:
             account_value=account_value,
             risk_halted=risk_halted,
             last_error=last_error,
-            uptime_seconds=(datetime.now(timezone.utc) - self._start_time).total_seconds(),
+            uptime_seconds=(
+                datetime.now(timezone.utc) - self._start_time
+            ).total_seconds(),
             trade_count=trade_count,
             equity_curve_points=equity_curve_points,
         )
 
     def _get_status(self) -> HealthStatus:
-        self._status.uptime_seconds = (datetime.now(timezone.utc) - self._start_time).total_seconds()
+        self._status.uptime_seconds = (
+            datetime.now(timezone.utc) - self._start_time
+        ).total_seconds()
         return self._status
 
     def start(self):
@@ -102,7 +108,7 @@ class HealthCheckServer:
         handler = lambda *args, **kwargs: HealthRequestHandler(
             *args, status_getter=self._get_status, **kwargs
         )
-        self.server = HTTPServer(("0.0.0.0", self.port), handler)
+        self.server = HTTPServer(("127.0.0.1", self.port), handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         logger.info("Health check server started on port %d", self.port)
