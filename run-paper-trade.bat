@@ -2,7 +2,7 @@
 setlocal
 
 set "ROOT=%~dp0"
-set "PYTHON=%ROOT%\.venv\Scripts\python.exe"
+set "PYTHON=%ROOT%.venv312\Scripts\python.exe"
 set "HOST=%MOOMOO_BOT_OPEND_HOST%"
 set "PORT=%MOOMOO_BOT_OPEND_PORT%"
 set "CAPITAL=%~1"
