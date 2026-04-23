@@ -71,7 +71,12 @@ def load_benchmark_series(path: Path) -> pd.Series:
     return series
 
 
-def build_monthly_strategy(settings, min_hold_days: int | None = None):
+def build_monthly_strategy(
+    settings,
+    min_hold_days: int | None = None,
+    satellite_weight: float | None = None,
+    inverse_volatility: bool = False,
+):
     return MonthlyMomentumRotationStrategy(
         MonthlyMomentumRotationConfig(
             lookback_days=settings.lookback_days,
@@ -82,6 +87,9 @@ def build_monthly_strategy(settings, min_hold_days: int | None = None):
             min_hold_days=min_hold_days
             if min_hold_days is not None
             else settings.min_hold_days,
+            inverse_volatility=inverse_volatility,
+            fallback_asset_symbol=settings.fallback_asset_symbol,
+            fallback_allocation=settings.fallback_allocation,
         )
     )
 
@@ -117,8 +125,19 @@ def submit_orders_with_duplicate_guard(
             )
             continue
 
-        response = trade_client.submit_order(instruction)
-        render_func(instruction, response)
+        try:
+            response = trade_client.submit_order(instruction)
+            render_func(instruction, response)
+        except Exception as exc:
+            from moomoo_bot.cli_render import console
+            from moomoo_bot.exceptions import OrderRejectedError
+
+            if "Not enough" in str(exc) or "invalid" in str(exc).lower():
+                console.print(
+                    f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
+                )
+                continue
+            raise
 
 
 def get_matching_active_order(trade_client, instruction):

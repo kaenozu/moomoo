@@ -20,6 +20,7 @@ from moomoo import (
     TrdMarket,
 )
 
+from moomoo_bot.exceptions import BrokerConnectionError, DataError, OrderRejectedError
 from moomoo_bot.paper import PaperOrderInstruction
 
 
@@ -54,32 +55,32 @@ class MoomooPaperTradeClient:
 
     def get_account_value(self) -> float:
         if self.trade_context is None:
-            raise RuntimeError("trade context is not initialized")
+            raise BrokerConnectionError("trade context is not initialized")
         ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise RuntimeError(f"Failed to fetch {mode_name} account info: {data}")
+            raise BrokerConnectionError(f"Failed to fetch {mode_name} account info: {data}")
         if not isinstance(data, pd.DataFrame) or data.empty:
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
-            raise RuntimeError(f"{mode_name} account info did not return rows")
+            raise DataError(f"{mode_name} account info did not return rows")
 
         row = data.iloc[0]
         for field in ("total_assets", "power", "available_funds"):
             value = row.get(field)
             if value is not None and float(value) > 0.0:
                 return float(value)
-        raise RuntimeError("Simulated account did not expose a positive account value")
+        raise DataError("Simulated account did not expose a positive account value")
 
     def get_position_frame(self) -> pd.DataFrame:
         if self.trade_context is None:
-            raise RuntimeError("trade context is not initialized")
+            raise BrokerConnectionError("trade context is not initialized")
         ret, data = self.trade_context.position_list_query(trd_env=self.trd_env)
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise RuntimeError(f"Failed to fetch {mode_name} positions: {data}")
+            raise BrokerConnectionError(f"Failed to fetch {mode_name} positions: {data}")
         if not isinstance(data, pd.DataFrame):
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
-            raise RuntimeError(f"{mode_name} positions did not return a DataFrame")
+            raise DataError(f"{mode_name} positions did not return a DataFrame")
         return data.copy()
 
     def get_position_quantities(self) -> dict[str, float]:
@@ -96,16 +97,16 @@ class MoomooPaperTradeClient:
 
     def get_order_frame(self, refresh_cache: bool = True) -> pd.DataFrame:
         if self.trade_context is None:
-            raise RuntimeError("trade context is not initialized")
+            raise BrokerConnectionError("trade context is not initialized")
         ret, data = self.trade_context.order_list_query(
             trd_env=self.trd_env, refresh_cache=refresh_cache
         )
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
-            raise RuntimeError(f"Failed to fetch {mode_name} orders: {data}")
+            raise BrokerConnectionError(f"Failed to fetch {mode_name} orders: {data}")
         if not isinstance(data, pd.DataFrame):
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Paper"
-            raise RuntimeError(f"{mode_name} orders did not return a DataFrame")
+            raise DataError(f"{mode_name} orders did not return a DataFrame")
         return data.copy()
 
     def get_active_order_frame(self, refresh_cache: bool = True) -> pd.DataFrame:
@@ -133,7 +134,11 @@ class MoomooPaperTradeClient:
 
     def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
         if self.trade_context is None:
-            raise RuntimeError("trade context is not initialized")
+            raise BrokerConnectionError("trade context is not initialized")
+        # Limit remark to 64 bytes (UTF-8)
+        remark = instruction.reason or ""
+        remark_bytes = remark.encode("utf-8")[:64]
+        remark = remark_bytes.decode("utf-8", errors="ignore")
         ret, data = self.trade_context.place_order(
             price=instruction.price,
             qty=instruction.quantity,
@@ -141,18 +146,18 @@ class MoomooPaperTradeClient:
             trd_side=instruction.side,
             order_type=OrderType.NORMAL,
             trd_env=self.trd_env,
-            remark=instruction.reason,
+            remark=remark,
             session=instruction.session or Session.NONE,
             fill_outside_rth=instruction.fill_outside_rth,
         )
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
-            raise RuntimeError(
+            raise OrderRejectedError(
                 f"Failed to submit {mode_name} order for {instruction.symbol}: {data}"
             )
         if not isinstance(data, pd.DataFrame):
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Paper"
-            raise RuntimeError(f"{mode_name} order response did not return a DataFrame")
+            raise DataError(f"{mode_name} order response did not return a DataFrame")
         return data
 
 
@@ -188,11 +193,13 @@ def _order_matches_instruction(
             float(order_row.get("qty", 0.0) or 0.0),
             float(instruction.quantity),
             rel_tol=1e-6,
+            abs_tol=0.001,
         )
         and isclose(
             float(order_row.get("price", 0.0) or 0.0),
             float(instruction.price),
             rel_tol=1e-6,
+            abs_tol=0.001,
         )
         and _normalize_order_session(order_row.get("session"))
         == _normalize_order_session(instruction.session)

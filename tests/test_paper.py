@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from moomoo import Session, TrdSide
 
@@ -87,7 +88,7 @@ def test_build_paper_rebalance_orders_sells_excess_and_buys_missing_positions() 
     assert [instruction.symbol for instruction in instructions] == ["US.TSLA", "US.AAPL", "US.MSFT"]
     assert instructions[0].quantity == 2.0
     assert instructions[1].quantity == 2.0
-    assert instructions[2].quantity == 2.5
+    assert instructions[2].quantity == pytest.approx(2.5)
 
 
 def test_build_paper_rebalance_orders_preserves_fractional_share_deltas() -> None:
@@ -112,12 +113,15 @@ def test_build_paper_rebalance_orders_preserves_fractional_share_deltas() -> Non
         latest_prices={"US.AMD": 284.49, "US.TSLA": 222.0},
     )
 
-    assert [instruction.symbol for instruction in instructions] == ["US.TSLA"]
-    assert instructions[0].side == TrdSide.SELL
-    assert instructions[0].quantity == 1.5
+    assert [instruction.symbol for instruction in instructions] == ["US.TSLA", "US.AMD"]
+    assert [instruction.side for instruction in instructions] == [TrdSide.SELL, TrdSide.BUY]
+    assert [instruction.quantity for instruction in instructions] == [
+        1.5,
+        pytest.approx(0.343),
+    ]
 
 
-def test_build_paper_rebalance_orders_rounds_down_fractional_buys_to_whole_shares() -> None:
+def test_build_paper_rebalance_orders_preserves_fractional_buy_deltas() -> None:
     index = pd.date_range("2025-01-01", periods=3, freq="B")
     prices = pd.DataFrame({"US.INTC": [66.0, 66.5, 67.12]}, index=index)
     decision = TradeDecision(
@@ -135,10 +139,10 @@ def test_build_paper_rebalance_orders_rounds_down_fractional_buys_to_whole_share
 
     assert len(instructions) == 1
     assert instructions[0].side == TrdSide.BUY
-    assert instructions[0].quantity == 9.0
+    assert instructions[0].quantity == pytest.approx(9.932)
 
 
-def test_build_paper_rebalance_orders_skips_sub_share_buy_orders() -> None:
+def test_build_paper_rebalance_orders_keeps_fractional_buy_orders() -> None:
     index = pd.date_range("2025-01-01", periods=3, freq="B")
     prices = pd.DataFrame(
         {
@@ -160,7 +164,12 @@ def test_build_paper_rebalance_orders_skips_sub_share_buy_orders() -> None:
         latest_prices={"US.AMD": 284.49, "US.GOOGL": 332.29},
     )
 
-    assert instructions == []
+    assert [instruction.symbol for instruction in instructions] == ["US.AMD", "US.GOOGL"]
+    assert [instruction.side for instruction in instructions] == [TrdSide.BUY, TrdSide.BUY]
+    assert [instruction.quantity for instruction in instructions] == [
+        pytest.approx(0.527),
+        pytest.approx(0.451),
+    ]
 
 
 def test_build_paper_rebalance_orders_uses_eth_session_when_market_closed() -> None:

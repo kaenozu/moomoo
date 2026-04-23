@@ -13,6 +13,7 @@ from collections.abc import Mapping
 import pandas as pd
 from moomoo import Session, TrdSide
 
+from moomoo_bot.quantities import round_quantity_toward_zero
 from moomoo_bot.strategy.base import TradeDecision
 
 
@@ -76,8 +77,8 @@ def build_paper_plan(
         if price <= 0.0:
             raise ValueError(f"invalid price for {symbol}: {price}")
 
-        target_value = capital * weight
-        target_value = min(target_value, capital * max_position_weight)
+        applied_weight = min(weight, max_position_weight)
+        target_value = capital * applied_weight
         target_quantity = floor((target_value / price) * 1000.0) / 1000.0
         target_cost = target_quantity * price
         if target_cost < minimum_order_value:
@@ -87,7 +88,7 @@ def build_paper_plan(
         allocations.append(
             PaperAllocation(
                 symbol=symbol,
-                weight=weight,
+                weight=applied_weight,
                 price=price,
                 target_value=target_value,
                 target_quantity=target_quantity,
@@ -120,7 +121,8 @@ def build_paper_rebalance_orders(
 
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
-        delta = normalize_order_quantity(allocation.target_quantity - current_qty)
+        raw_delta = allocation.target_quantity - current_qty
+        delta = round_quantity_toward_zero(raw_delta)
         if delta > 0.0:
             instructions.append(
                 PaperOrderInstruction(
@@ -149,7 +151,7 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = normalize_order_quantity(float(current_qty))
+        sell_qty = round_quantity_toward_zero(float(current_qty))
         if sell_qty > 0.0:
             if symbol not in prices:
                 raise ValueError(
@@ -177,6 +179,3 @@ def build_paper_rebalance_orders(
     )
 
 
-def normalize_order_quantity(quantity: float) -> float:
-    rounded = round(float(quantity), 3)
-    return rounded if abs(rounded) > 0.0 else 0.0

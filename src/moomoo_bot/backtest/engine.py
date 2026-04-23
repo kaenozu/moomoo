@@ -28,6 +28,9 @@ class BacktestResult:
     sharpe: float
     max_drawdown: float
     outperformance: float
+    sortino: float = 0.0
+    calmar: float = 0.0
+    max_drawdown_duration_days: int = 0
 
     def summary(self) -> dict[str, float]:
         return {
@@ -37,7 +40,10 @@ class BacktestResult:
             "benchmark_cagr": self.benchmark_cagr,
             "volatility": self.volatility,
             "sharpe": self.sharpe,
+            "sortino": self.sortino,
+            "calmar": self.calmar,
             "max_drawdown": self.max_drawdown,
+            "max_drawdown_duration_days": float(self.max_drawdown_duration_days),
             "outperformance": self.outperformance,
             "trade_count": float(self.trade_count),
             "transaction_costs": self.transaction_costs,
@@ -71,6 +77,10 @@ def blend_result_with_benchmark(
         else 0.0
     )
 
+    sortino = _sortino_ratio(blended_returns.iloc[1:])
+    calmar = _calmar_ratio(_annualized_return(blended_equity), _max_drawdown(blended_equity))
+    max_dd_duration = _max_drawdown_duration_days(blended_equity)
+
     return BacktestResult(
         equity_curve=blended_equity,
         benchmark_curve=strategy_result.benchmark_curve,
@@ -84,6 +94,9 @@ def blend_result_with_benchmark(
         sharpe=_sharpe_ratio(blended_returns.iloc[1:]),
         max_drawdown=_max_drawdown(blended_equity),
         outperformance=total_return - benchmark_return,
+        sortino=sortino,
+        calmar=calmar,
+        max_drawdown_duration_days=max_dd_duration,
     )
 
 
@@ -102,6 +115,10 @@ def run_backtest(
         raise ValueError("transaction_cost_per_trade must not be negative")
     if transaction_cost_bps < 0.0:
         raise ValueError("transaction_cost_bps must not be negative")
+
+    reset_strategy = getattr(strategy, "reset", None)
+    if callable(reset_strategy):
+        reset_strategy()
 
     prices = prices.sort_index()
     benchmark = benchmark.sort_index().reindex(prices.index).ffill()
@@ -162,7 +179,10 @@ def run_backtest(
         else 0.0
     )
     sharpe = _sharpe_ratio(portfolio_return_series)
+    sortino = _sortino_ratio(portfolio_return_series)
     max_drawdown = _max_drawdown(equity_curve)
+    max_dd_duration = _max_drawdown_duration_days(equity_curve)
+    calmar = _calmar_ratio(cagr, max_drawdown)
 
     return BacktestResult(
         equity_curve=equity_curve,
@@ -177,6 +197,9 @@ def run_backtest(
         sharpe=sharpe,
         max_drawdown=max_drawdown,
         outperformance=total_return - benchmark_total_return,
+        sortino=sortino,
+        calmar=calmar,
+        max_drawdown_duration_days=max_dd_duration,
     )
 
 
@@ -215,4 +238,53 @@ def max_drawdown(curve: pd.Series) -> float:
 
 _annualized_return = annualized_return
 _sharpe_ratio = sharpe_ratio
+def sortino_ratio(returns: pd.Series) -> float:
+    if len(returns) < 2:
+        return 0.0
+    # Downside deviation
+    downside = returns.copy()
+    downside[downside > 0.0] = 0.0
+    downside_dev = float(downside.std(ddof=0))
+    if downside_dev == 0.0:
+        return 0.0
+    excess_returns = returns.mean()  # Assume risk-free = 0
+    return float((excess_returns / downside_dev) * sqrt(252))
+
+
+def calmar_ratio(cagr: float, max_drawdown: float) -> float:
+    if abs(max_drawdown) < 1e-9:
+        return 0.0 if max_drawdown >= 0 else float('inf')
+    return float(cagr / abs(max_drawdown))
+
+
+def max_drawdown_duration_days(curve: pd.Series) -> int:
+    running_max = curve.cummax()
+    drawdown = curve.div(running_max).sub(1.0)
+    is_in_drawdown = drawdown < 0.0
+
+    if not is_in_drawdown.any():
+        return 0
+
+    # Find drawdown periods
+    periods: list[int] = []
+    current_length = 0
+    for val in is_in_drawdown:
+        if val:
+            current_length += 1
+        else:
+            if current_length > 0:
+                periods.append(current_length)
+                current_length = 0
+
+    if current_length > 0:
+        periods.append(current_length)
+
+    return max(periods) if periods else 0
+
+
+_annualized_return = annualized_return
+_sharpe_ratio = sharpe_ratio
 _max_drawdown = max_drawdown
+_sortino_ratio = sortino_ratio
+_calmar_ratio = calmar_ratio
+_max_drawdown_duration_days = max_drawdown_duration_days

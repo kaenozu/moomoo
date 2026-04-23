@@ -24,9 +24,6 @@ def format_ratio(value: float) -> str:
     return f"{value:.2f}"
 
 
-_format_percent = format_percent
-_format_ratio = format_ratio
-
 
 def render_backtest_result(
     result: BacktestResult,
