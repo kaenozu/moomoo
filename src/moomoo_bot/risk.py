@@ -8,12 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import floor
 
 import pandas as pd
 from moomoo import Session, TrdSide
 
-from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.paper import PaperOrderInstruction, normalize_order_quantity
 
 
 @dataclass
@@ -45,20 +44,15 @@ def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | N
     return None
 
 
-def update_drawdown_state(account_value: float, state: RiskState, max_drawdown_pct: float, reset_threshold_pct: float = 0.0) -> str | None:
+def update_drawdown_state(
+    account_value: float, state: RiskState, max_drawdown_pct: float
+) -> str | None:
     if account_value <= 0.0:
         account_value = 0.0
 
-    if state.halted and state.peak_account_value is not None and account_value > 0.0:
-        current_drawdown = (state.peak_account_value - account_value) / state.peak_account_value
-        if reset_threshold_pct > 0.0 and current_drawdown <= reset_threshold_pct:
-            state.halted = False
-            state.halted_reason = None
-
-    if not state.halted:
-        if state.peak_account_value is None or account_value > state.peak_account_value:
-            state.peak_account_value = account_value
-            return None
+    if state.peak_account_value is None or account_value > state.peak_account_value:
+        state.peak_account_value = account_value
+        return None
 
     peak = state.peak_account_value
     if peak is None or peak <= 0.0:
@@ -84,7 +78,7 @@ def build_liquidation_orders(
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = _round_down_to_integer(quantity)
+        sell_qty = normalize_order_quantity(quantity)
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -120,14 +114,18 @@ def build_stop_loss_take_profit_orders(
         if not symbol or symbol not in latest_prices:
             continue
 
-        quantity = _extract_float(row, ("qty", "position_qty", "holding_qty", "can_use_qty"))
+        quantity = _extract_float(
+            row, ("qty", "position_qty", "holding_qty", "can_use_qty")
+        )
         if quantity is None or quantity <= 0.0:
             continue
-        quantity = _round_down_to_integer(quantity)
+        quantity = normalize_order_quantity(quantity)
         if quantity <= 0.0:
             continue
 
-        basis = _extract_float(row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost"))
+        basis = _extract_float(
+            row, ("cost_price", "avg_cost", "avg_price", "price_cost", "cost")
+        )
         if basis is None or basis <= 0.0:
             continue
 
@@ -185,12 +183,3 @@ def _extract_float(row: pd.Series, fields: tuple[str, ...]) -> float | None:
         if numeric > 0.0:
             return numeric
     return None
-
-
-def _round_down_to_integer(quantity: float) -> float:
-    """Round towards zero, then to integer, always returns non-negative.
-
-    Used for position quantities where sign doesn't matter (always selling).
-    """
-    normalized_quantity = floor(abs(float(quantity)))
-    return float(normalized_quantity) if normalized_quantity > 0 else 0.0

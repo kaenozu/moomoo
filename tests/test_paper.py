@@ -87,7 +87,7 @@ def test_build_paper_rebalance_orders_sells_excess_and_buys_missing_positions() 
     assert [instruction.symbol for instruction in instructions] == ["US.TSLA", "US.AAPL", "US.MSFT"]
     assert instructions[0].quantity == 2.0
     assert instructions[1].quantity == 2.0
-    assert instructions[2].quantity == 2.0
+    assert instructions[2].quantity == 2.5
 
 
 def test_build_paper_rebalance_orders_preserves_fractional_share_deltas() -> None:

@@ -57,7 +57,11 @@ def render_backtest_result(
 
 
 def render_snapshot(snapshot: pd.DataFrame) -> None:
-    columns = [column for column in ("code", "name", "last_price", "update_time", "prev_close_price") if column in snapshot.columns]
+    columns = [
+        column
+        for column in ("code", "name", "last_price", "update_time", "prev_close_price")
+        if column in snapshot.columns
+    ]
     if not columns:
         return
 
@@ -71,7 +75,9 @@ def render_snapshot(snapshot: pd.DataFrame) -> None:
     console.print(table)
 
 
-def render_research_results(results, benchmark_label: str, universe: str, evaluated_count: int | None = None) -> None:
+def render_research_results(
+    results, benchmark_label: str, universe: str, evaluated_count: int | None = None
+) -> None:
     if not results:
         console.print("No strategies matched the search criteria.")
         return
@@ -161,7 +167,9 @@ def render_satellite_results(
         )
 
     console.print(table)
-    console.print(f"Evaluated {config_count} momentum configurations across {weight_count} satellite weights ({evaluated_count} combinations).")
+    console.print(
+        f"Evaluated {config_count} momentum configurations across {weight_count} satellite weights ({evaluated_count} combinations)."
+    )
 
     best = results[0]
     console.print(
@@ -180,7 +188,9 @@ def render_satellite_results(
         )
 
 
-def render_paper_plan(plan: PaperPlan, benchmark_label: str, universe: str, benchmark_series: pd.Series) -> None:
+def render_paper_plan(
+    plan: PaperPlan, benchmark_label: str, universe: str, benchmark_series: pd.Series
+) -> None:
     table = Table(title="Paper Trading Plan")
     table.add_column("Symbol", style="cyan", no_wrap=True)
     table.add_column("Weight")
@@ -206,7 +216,9 @@ def render_paper_plan(plan: PaperPlan, benchmark_label: str, universe: str, benc
     console.print(f"Reason: {plan.reason}")
     console.print(f"Capital: {plan.capital:,.2f}")
     console.print(f"Cash remaining after sizing: {plan.cash_remaining:,.2f}")
-    console.print(f"Benchmark last close: {float(benchmark_series.loc[:plan.as_of].iloc[-1]):.2f}")
+    console.print(
+        f"Benchmark last close: {float(benchmark_series.loc[: plan.as_of].iloc[-1]):.2f}"
+    )
 
 
 def render_paper_trade_plan(
@@ -238,7 +250,9 @@ def render_paper_trade_plan(
     console.print(table)
 
 
-def render_risk_orders(instructions, current_positions: dict[str, float], title: str) -> None:
+def render_risk_orders(
+    instructions, current_positions: dict[str, float], title: str
+) -> None:
     if not instructions:
         console.print(f"{title}: none")
         return

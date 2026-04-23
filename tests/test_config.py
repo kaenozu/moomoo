@@ -39,32 +39,23 @@ def test_live_trading_defaults_to_disabled() -> None:
 
 def test_fx_rate_can_be_overridden_via_environment(monkeypatch) -> None:
     monkeypatch.setenv("MOOMOO_BOT_FX_JPY_PER_USD", "155.5")
-    get_settings.cache_clear()
 
     settings = get_settings()
 
     assert settings.fx_jpy_per_usd == 155.5
 
-    get_settings.cache_clear()
-
 
 def test_live_trading_flag_can_be_overridden_via_environment(monkeypatch) -> None:
     monkeypatch.setenv("MOOMOO_BOT_ALLOW_LIVE_TRADING", "true")
-    get_settings.cache_clear()
 
     settings = get_settings()
 
     assert settings.allow_live_trading is True
 
-    get_settings.cache_clear()
-
 
 def test_live_position_cap_can_be_overridden_via_environment(monkeypatch) -> None:
     monkeypatch.setenv("MOOMOO_BOT_LIVE_MAX_POSITION_WEIGHT", "0.25")
-    get_settings.cache_clear()
 
     settings = get_settings()
 
     assert settings.live_max_position_weight == 0.25
-
-    get_settings.cache_clear()

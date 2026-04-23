@@ -12,12 +12,20 @@ from typing import Sequence
 import pandas as pd
 
 from moomoo_bot.backtest import BacktestResult, run_backtest
-from moomoo_bot.backtest.engine import blend_result_with_benchmark, annualized_return, sharpe_ratio, max_drawdown
-from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
+from moomoo_bot.backtest.engine import (
+    blend_result_with_benchmark,
+    annualized_return,
+    sharpe_ratio,
+    max_drawdown,
+)
+from moomoo_bot.strategy.momentum import (
+    MonthlyMomentumRotationConfig,
+    MonthlyMomentumRotationStrategy,
+)
 
 
 @dataclass(frozen=True)
-class MomentumSearchResult:
+class _SearchResultBase:
     config: MonthlyMomentumRotationConfig
     full_result: BacktestResult
     train_excess: float
@@ -50,40 +58,18 @@ class MomentumSearchResult:
 
 
 @dataclass(frozen=True)
-class SatelliteSearchResult:
-    config: MonthlyMomentumRotationConfig
-    satellite_weight: float
-    full_result: BacktestResult
-    train_excess: float
-    test_excess: float
-    train_cagr: float
-    test_cagr: float
-    test_sharpe: float
-    train_drawdown: float
-    test_drawdown: float
-
-    @property
-    def full_excess(self) -> float:
-        return self.full_result.total_return - self.full_result.benchmark_return
-
-    @property
-    def full_cagr(self) -> float:
-        return self.full_result.cagr
-
-    @property
-    def full_sharpe(self) -> float:
-        return self.full_result.sharpe
-
-    @property
-    def full_drawdown(self) -> float:
-        return self.full_result.max_drawdown
-
-    @property
-    def trade_count(self) -> int:
-        return self.full_result.trade_count
+class MomentumSearchResult(_SearchResultBase):
+    pass
 
 
-def default_momentum_search_configs(min_hold_days: int = 0) -> list[MonthlyMomentumRotationConfig]:
+@dataclass(frozen=True)
+class SatelliteSearchResult(_SearchResultBase):
+    satellite_weight: float = 0.0
+
+
+def default_momentum_search_configs(
+    min_hold_days: int = 0,
+) -> list[MonthlyMomentumRotationConfig]:
     configs: list[MonthlyMomentumRotationConfig] = []
     for lookback_days in (189, 252, 315):
         for trend_days in (150, 200, 252):
@@ -119,25 +105,42 @@ def search_momentum_candidates(
     if not 0.5 <= split_ratio < 1.0:
         raise ValueError("split_ratio must be between 0.5 and 1.0")
 
-    candidate_configs = list(configs) if configs is not None else default_momentum_search_configs()
+    candidate_configs = (
+        list(configs) if configs is not None else default_momentum_search_configs()
+    )
     if not candidate_configs:
         raise ValueError("configs must not be empty")
 
-    train_end_date, test_start_date = _split_period_boundaries(prices.index, split_ratio)
+    train_end_date, test_start_date = _split_period_boundaries(
+        prices.index, split_ratio
+    )
 
     ranked_results: list[MomentumSearchResult] = []
     for config in candidate_configs:
-        full_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config),
-                         transaction_cost_per_trade=0.0, transaction_cost_bps=0.0)
-        train_metrics = _summarize_period(full_result.equity_curve, full_result.benchmark_curve, prices.index[0], train_end_date)
-        test_metrics = _summarize_period(full_result.equity_curve, full_result.benchmark_curve, test_start_date, prices.index[-1])
+        full_result = run_backtest(
+            prices, benchmark, MonthlyMomentumRotationStrategy(config)
+        )
+        train_metrics = _summarize_period(
+            full_result.equity_curve,
+            full_result.benchmark_curve,
+            prices.index[0],
+            train_end_date,
+        )
+        test_metrics = _summarize_period(
+            full_result.equity_curve,
+            full_result.benchmark_curve,
+            test_start_date,
+            prices.index[-1],
+        )
 
         ranked_results.append(
             MomentumSearchResult(
                 config=config,
                 full_result=full_result,
-                train_excess=train_metrics["total_return"] - train_metrics["benchmark_return"],
-                test_excess=test_metrics["total_return"] - test_metrics["benchmark_return"],
+                train_excess=train_metrics["total_return"]
+                - train_metrics["benchmark_return"],
+                test_excess=test_metrics["total_return"]
+                - test_metrics["benchmark_return"],
                 train_cagr=train_metrics["cagr"],
                 test_cagr=test_metrics["cagr"],
                 test_sharpe=test_metrics["sharpe"],
@@ -172,20 +175,29 @@ def search_satellite_candidates(
     if not 0.5 <= split_ratio < 1.0:
         raise ValueError("split_ratio must be between 0.5 and 1.0")
 
-    candidate_configs = list(configs) if configs is not None else default_momentum_search_configs()
+    candidate_configs = (
+        list(configs) if configs is not None else default_momentum_search_configs()
+    )
     if not candidate_configs:
         raise ValueError("configs must not be empty")
 
-    candidate_weights = list(satellite_weights) if satellite_weights is not None else default_satellite_weights()
+    candidate_weights = (
+        list(satellite_weights)
+        if satellite_weights is not None
+        else default_satellite_weights()
+    )
     if not candidate_weights:
         raise ValueError("satellite_weights must not be empty")
 
-    train_end_date, test_start_date = _split_period_boundaries(prices.index, split_ratio)
+    train_end_date, test_start_date = _split_period_boundaries(
+        prices.index, split_ratio
+    )
 
     ranked_results: list[SatelliteSearchResult] = []
     for config in candidate_configs:
-        strategy_result = run_backtest(prices, benchmark, MonthlyMomentumRotationStrategy(config),
-                              transaction_cost_per_trade=0.0, transaction_cost_bps=0.0)
+        strategy_result = run_backtest(
+            prices, benchmark, MonthlyMomentumRotationStrategy(config)
+        )
         for satellite_weight in candidate_weights:
             blended_result = _blend_with_benchmark(strategy_result, satellite_weight)
             train_metrics = _summarize_period(
@@ -206,8 +218,10 @@ def search_satellite_candidates(
                     config=config,
                     satellite_weight=satellite_weight,
                     full_result=blended_result,
-                    train_excess=train_metrics["total_return"] - train_metrics["benchmark_return"],
-                    test_excess=test_metrics["total_return"] - test_metrics["benchmark_return"],
+                    train_excess=train_metrics["total_return"]
+                    - train_metrics["benchmark_return"],
+                    test_excess=test_metrics["total_return"]
+                    - test_metrics["benchmark_return"],
                     train_cagr=train_metrics["cagr"],
                     test_cagr=test_metrics["cagr"],
                     test_sharpe=test_metrics["sharpe"],
@@ -241,7 +255,9 @@ def _summarize_period(
 
     return {
         "total_return": float(period_equity.iloc[-1] / period_equity.iloc[0] - 1.0),
-        "benchmark_return": float(period_benchmark.iloc[-1] / period_benchmark.iloc[0] - 1.0),
+        "benchmark_return": float(
+            period_benchmark.iloc[-1] / period_benchmark.iloc[0] - 1.0
+        ),
         "cagr": _annualized_return(period_equity),
         "benchmark_cagr": _annualized_return(period_benchmark),
         "sharpe": _sharpe_ratio(period_equity.pct_change().dropna()),
@@ -249,83 +265,19 @@ def _summarize_period(
     }
 
 
-def _split_period_boundaries(index: pd.Index, split_ratio: float) -> tuple[pd.Timestamp, pd.Timestamp]:
+def _split_period_boundaries(
+    index: pd.Index, split_ratio: float
+) -> tuple[pd.Timestamp, pd.Timestamp]:
     split_index = int(len(index) * split_ratio)
     if split_index <= 1 or split_index >= len(index) - 1:
         raise ValueError("split_ratio leaves no room for both train and test periods")
     return pd.Timestamp(index[split_index - 1]), pd.Timestamp(index[split_index])
 
 
-def _blend_with_benchmark(strategy_result: BacktestResult, satellite_weight: float) -> BacktestResult:
+def _blend_with_benchmark(
+    strategy_result: BacktestResult, satellite_weight: float
+) -> BacktestResult:
     return blend_result_with_benchmark(strategy_result, satellite_weight)
-
-
-def run_walk_forward_test(
-    prices: pd.DataFrame,
-    benchmark: pd.Series,
-    strategy_factory,
-    train_years: int = 3,
-    test_years: int = 1,
-    min_test_days: int = 60,
-    required_rows: int = 300,
-) -> list[BacktestResult]:
-    """Run rolling walk-forward tests.
-
-    Args:
-        prices: Price DataFrame with symbols as columns.
-        benchmark: Benchmark series.
-        strategy_factory: Callable that returns a Strategy instance.
-        train_years: Years to use for training (optimization).
-        test_years: Years to use for testing (out-of-sample).
-        min_test_days: Minimum days required in test period.
-        required_rows: Historical rows required for strategy warmup.
-
-    Returns:
-        List of BacktestResult for each walk-forward window.
-    """
-    from moomoo_bot.backtest import run_backtest
-
-    if prices.empty:
-        raise ValueError("prices must not be empty")
-    if train_years < 1:
-        raise ValueError("train_years must be at least 1")
-    if test_years < 1:
-        raise ValueError("test_years must be at least 1")
-
-    dates = prices.sort_index().index
-    train_days = train_years * 252
-    test_days = test_years * 252
-
-    results: list[BacktestResult] = []
-    offset = 0
-
-    while True:
-        test_start_idx = offset + train_days
-        test_end_idx = test_start_idx + test_days
-
-        if test_start_idx - required_rows < 0:
-            offset += test_days
-            continue
-        if test_end_idx > len(dates):
-            break
-
-        warmup_start_date = dates[test_start_idx - required_rows]
-        test_end_date = dates[test_end_idx - 1]
-
-        warmup_test_prices = prices.loc[warmup_start_date:test_end_date]
-        warmup_test_benchmark = benchmark.loc[warmup_start_date:test_end_date]
-
-        if len(warmup_test_prices) < required_rows + min_test_days:
-            offset += test_days
-            continue
-
-        strategy = strategy_factory()
-        result = run_backtest(warmup_test_prices, warmup_test_benchmark, strategy)
-        results.append(result)
-
-        offset += test_days
-
-    return results
 
 
 _annualized_return = annualized_return

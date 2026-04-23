@@ -7,11 +7,13 @@ Related: cli.py.
 from pathlib import Path
 
 import pandas as pd
-from moomoo import Session, TrdEnv
+from moomoo import TrdEnv
 
 from moomoo_bot.broker import MoomooOpenDClient
-from moomoo_bot.cli_render import console
-from moomoo_bot.strategy.momentum import MonthlyMomentumRotationConfig, MonthlyMomentumRotationStrategy
+from moomoo_bot.strategy.momentum import (
+    MonthlyMomentumRotationConfig,
+    MonthlyMomentumRotationStrategy,
+)
 
 
 def parse_symbols(raw_symbols: str | None) -> list[str]:
@@ -39,7 +41,9 @@ def fetch_market_state(client: MoomooOpenDClient, benchmark_symbol: str) -> str:
     market_state_frame = client.fetch_market_state([benchmark_symbol])
     if market_state_frame.empty:
         raise RuntimeError(f"No market state returned for {benchmark_symbol}")
-    market_state = str(market_state_frame.iloc[0].get("market_state", "")).strip().upper()
+    market_state = (
+        str(market_state_frame.iloc[0].get("market_state", "")).strip().upper()
+    )
     if not market_state:
         raise RuntimeError(f"Market state returned no value for {benchmark_symbol}")
     return market_state
@@ -75,12 +79,9 @@ def build_monthly_strategy(settings, min_hold_days: int | None = None):
             top_n=settings.top_n,
             skip_days=settings.skip_days,
             rebalance_days=settings.rebalance_days,
-            min_hold_days=min_hold_days if min_hold_days is not None else settings.min_hold_days,
-            volatility_lookback_days=settings.volatility_lookback_days,
-            max_volatility_percentile=settings.max_volatility_percentile,
-            relative_strength_lookback_days=settings.relative_strength_lookback_days,
-            fallback_asset_symbol=settings.fallback_asset_symbol,
-            fallback_allocation=settings.fallback_allocation,
+            min_hold_days=min_hold_days
+            if min_hold_days is not None
+            else settings.min_hold_days,
         )
     )
 
@@ -97,36 +98,18 @@ def position_quantities(position_frame: pd.DataFrame) -> dict[str, float]:
     return positions
 
 
-def require_paper_mode(settings, command_name: str) -> None:
-    if settings.execution_mode != "paper":
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_EXECUTION_MODE=paper")
-
-
-def require_live_mode(settings, command_name: str, confirm_live_trading: bool) -> None:
-    if settings.execution_mode != "live":
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_EXECUTION_MODE=live")
-    if not settings.allow_live_trading:
-        raise ValueError(f"{command_name} requires MOOMOO_BOT_ALLOW_LIVE_TRADING=true")
-    if not confirm_live_trading:
-        raise ValueError(f"{command_name} requires --confirm-live-trading")
-
-
 def trade_mode_label(trd_env: TrdEnv) -> str:
     return "live" if trd_env == TrdEnv.REAL else "paper"
 
 
-def select_session(market_open: bool) -> Session:
-    return Session.NONE if market_open else Session.ETH
-
-
-def select_fill_outside_rth(market_open: bool) -> bool:
-    return not market_open
-
-
-def submit_orders_with_duplicate_guard(trade_client, instructions, mode_label: str, render_func) -> None:
+def submit_orders_with_duplicate_guard(
+    trade_client, instructions, mode_label: str, render_func
+) -> None:
     for instruction in instructions:
         matching_order = get_matching_active_order(trade_client, instruction)
         if matching_order is not None:
+            from moomoo_bot.cli_render import console
+
             console.print(
                 f"Skipping duplicate {mode_label} order for {instruction.symbol} qty={instruction.quantity:.3f} "
                 f"price={instruction.price:.2f} order_id={matching_order.get('order_id')} "

@@ -9,28 +9,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-import time
+from time import sleep
 from typing import Protocol
 
 import pandas as pd
 from moomoo import AuType, KL_FIELD, KLType, OpenQuoteContext, RET_OK
 
-from moomoo_bot.config import get_settings
 
-
-def _get_retry_settings() -> tuple[int, float, int, float]:
-    """Get retry settings from config.
-
-    Returns:
-        Tuple of (history_retries, history_delay, quote_retries, quote_delay).
-    """
-    settings = get_settings()
-    return (
-        settings.history_retries,
-        settings.history_retry_delay_seconds,
-        settings.quote_retries,
-        settings.quote_retry_delay_seconds,
-    )
+_HISTORY_REQUEST_RETRIES = 3
+_HISTORY_REQUEST_RETRY_DELAY_SECONDS = 0.5
+_QUOTE_REQUEST_RETRIES = 3
+_QUOTE_REQUEST_RETRY_DELAY_SECONDS = 0.5
 
 
 class QuoteContext(Protocol):
@@ -45,17 +34,17 @@ class QuoteContext(Protocol):
         max_count: int = 1000,
         page_req_key: bytes | None = None,
         extended_time: bool = False,
-    ) -> tuple[int, pd.DataFrame, bytes | None]:
-        ...
+    ) -> tuple[int, pd.DataFrame, bytes | None]: ...
 
-    def get_market_snapshot(self, code_list: Sequence[str]) -> tuple[int, pd.DataFrame | str]:
-        ...
+    def get_market_snapshot(
+        self, code_list: Sequence[str]
+    ) -> tuple[int, pd.DataFrame | str]: ...
 
-    def get_market_state(self, code_list: Sequence[str]) -> tuple[int, pd.DataFrame | str]:
-        ...
+    def get_market_state(
+        self, code_list: Sequence[str]
+    ) -> tuple[int, pd.DataFrame | str]: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 @dataclass
@@ -75,27 +64,32 @@ class MoomooOpenDClient:
     def fetch_market_snapshot(self, code_list: Sequence[str]) -> pd.DataFrame:
         if self.quote_context is None:
             raise RuntimeError("OpenD quote context is not initialized")
-        return self._fetch_quote_frame(code_list, self.quote_context.get_market_snapshot, "market snapshot")
+        return self._fetch_quote_frame(
+            code_list, self.quote_context.get_market_snapshot, "market snapshot"
+        )
 
     def fetch_market_state(self, code_list: Sequence[str]) -> pd.DataFrame:
         if self.quote_context is None:
             raise RuntimeError("OpenD quote context is not initialized")
-        return self._fetch_quote_frame(code_list, self.quote_context.get_market_state, "market state")
+        return self._fetch_quote_frame(
+            code_list, self.quote_context.get_market_state, "market state"
+        )
 
-    def _fetch_quote_frame(self, code_list: Sequence[str], fetcher, label: str) -> pd.DataFrame:
+    def _fetch_quote_frame(
+        self, code_list: Sequence[str], fetcher, label: str
+    ) -> pd.DataFrame:
         if self.quote_context is None:
             raise RuntimeError("OpenD quote context is not initialized")
 
-        _, _, quote_retries, quote_delay = _get_retry_settings()
-        for attempt in range(1, quote_retries + 1):
+        for attempt in range(1, _QUOTE_REQUEST_RETRIES + 1):
             ret, data = fetcher(list(code_list))
             if ret == RET_OK:
                 if not isinstance(data, pd.DataFrame):
                     raise RuntimeError(f"{label.title()} did not return a DataFrame")
                 return data
-            if attempt == quote_retries or not _is_transient_quote_error(data):
+            if attempt == _QUOTE_REQUEST_RETRIES or not _is_transient_quote_error(data):
                 raise RuntimeError(f"Failed to fetch {label}: {data}")
-            time.sleep(quote_delay * attempt)
+            sleep(_QUOTE_REQUEST_RETRY_DELAY_SECONDS * attempt)
         raise RuntimeError(f"Failed to fetch {label}: exhausted retries")
 
     def fetch_history(
@@ -111,9 +105,8 @@ class MoomooOpenDClient:
         pages: list[pd.DataFrame] = []
         page_req_key: bytes | None = None
 
-        history_retries, history_delay, _, _ = _get_retry_settings()
         while True:
-            for attempt in range(1, history_retries + 1):
+            for attempt in range(1, _HISTORY_REQUEST_RETRIES + 1):
                 ret, data, next_page_req_key = self.quote_context.request_history_kline(
                     code,
                     start=start,
@@ -128,9 +121,14 @@ class MoomooOpenDClient:
                 if ret == RET_OK:
                     page_req_key = next_page_req_key
                     break
-                if attempt == history_retries or not _is_transient_history_error(data):
-                    raise RuntimeError(f"Failed to fetch historical candlesticks for {code}: {data}")
-                time.sleep(history_delay * attempt)
+                if (
+                    attempt == _HISTORY_REQUEST_RETRIES
+                    or not _is_transient_history_error(data)
+                ):
+                    raise RuntimeError(
+                        f"Failed to fetch historical candlesticks for {code}: {data}"
+                    )
+                sleep(_HISTORY_REQUEST_RETRY_DELAY_SECONDS * attempt)
             if isinstance(data, pd.DataFrame) and not data.empty:
                 pages.append(data)
             if page_req_key is None:
@@ -141,13 +139,19 @@ class MoomooOpenDClient:
 
         history = pd.concat(pages, ignore_index=True)
         if "time_key" not in history.columns:
-            raise RuntimeError(f"Historical candlesticks for {code} did not include time_key")
+            raise RuntimeError(
+                f"Historical candlesticks for {code} did not include time_key"
+            )
         if "close" not in history.columns:
-            raise RuntimeError(f"Historical candlesticks for {code} did not include close")
+            raise RuntimeError(
+                f"Historical candlesticks for {code} did not include close"
+            )
 
         history = history.copy()
         history["time_key"] = pd.to_datetime(history["time_key"])
-        history = history.sort_values("time_key").drop_duplicates(subset=["time_key"], keep="last")
+        history = history.sort_values("time_key").drop_duplicates(
+            subset=["time_key"], keep="last"
+        )
         history = history.set_index("time_key")
         return history
 
@@ -168,11 +172,15 @@ class MoomooOpenDClient:
 
         series_by_symbol: dict[str, pd.Series] = {}
         for symbol in symbol_order:
-            history = self.fetch_history(symbol, start=start_date.isoformat(), end=end_date.isoformat())
+            history = self.fetch_history(
+                symbol, start=start_date.isoformat(), end=end_date.isoformat()
+            )
             if history.empty:
                 raise RuntimeError(f"No historical data returned for {symbol}")
             if "close" not in history.columns:
-                raise RuntimeError(f"Historical data for {symbol} is missing close prices")
+                raise RuntimeError(
+                    f"Historical data for {symbol} is missing close prices"
+                )
             series = history["close"].rename(symbol)
             series.index = pd.to_datetime(series.index)
             series_by_symbol[symbol] = series.sort_index()
@@ -216,4 +224,10 @@ def _is_transient_history_error(data: object) -> bool:
 
 def _is_transient_quote_error(data: object) -> bool:
     message = str(data).lower()
-    return "timeout" in message or "timed out" in message or "callclose" in message or "disconnect" in message or "network" in message
+    return (
+        "timeout" in message
+        or "timed out" in message
+        or "callclose" in message
+        or "disconnect" in message
+        or "network" in message
+    )
