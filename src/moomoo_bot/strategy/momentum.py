@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from .base import TradeDecision
+from .base import Strategy, TradeDecision
 
 
 @dataclass(frozen=True)
@@ -213,4 +213,55 @@ class MonthlyMomentumRotationStrategy:
 
         return TradeDecision(
             as_of=as_of, target_weights=self._current_weights, reason=reason
+        )
+
+
+class CoreSatelliteStrategy:
+    """Blend an active strategy sleeve with a benchmark core sleeve."""
+
+    def __init__(
+        self,
+        strategy: Strategy,
+        benchmark_symbol: str,
+        satellite_weight: float,
+    ) -> None:
+        if not 0.0 <= satellite_weight <= 1.0:
+            raise ValueError("satellite_weight must be between 0.0 and 1.0")
+        self.strategy = strategy
+        self.benchmark_symbol = benchmark_symbol
+        self.satellite_weight = satellite_weight
+
+    @property
+    def requires_benchmark_prices(self) -> bool:
+        return self.satellite_weight < 1.0
+
+    def reset(self) -> None:
+        reset_strategy = getattr(self.strategy, "reset", None)
+        if callable(reset_strategy):
+            reset_strategy()
+
+    def __getattr__(self, name: str):
+        return getattr(self.strategy, name)
+
+    def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
+        active_prices = prices.drop(columns=[self.benchmark_symbol], errors="ignore")
+        decision = self.strategy.decide(active_prices, as_of)
+        active_weights = {
+            symbol: round(float(weight) * self.satellite_weight, 12)
+            for symbol, weight in decision.target_weights.items()
+            if symbol != self.benchmark_symbol
+        }
+        benchmark_weight = round(
+            (1.0 - self.satellite_weight)
+            + float(decision.target_weights.get(self.benchmark_symbol, 0.0))
+            * self.satellite_weight,
+            12,
+        )
+        if benchmark_weight > 0.0:
+            active_weights[self.benchmark_symbol] = benchmark_weight
+
+        return TradeDecision(
+            as_of=decision.as_of,
+            target_weights=active_weights,
+            reason=f"{decision.reason}:core_satellite={self.satellite_weight:.0%}/{(1.0 - self.satellite_weight):.0%}",
         )

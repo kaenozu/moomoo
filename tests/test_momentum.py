@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import pytest
 import pandas as pd
 
 from moomoo_bot.strategy.momentum import (
+    CoreSatelliteStrategy,
     MomentumRotationConfig,
     MomentumRotationStrategy,
     MonthlyMomentumRotationConfig,
     MonthlyMomentumRotationStrategy,
 )
+from moomoo_bot.strategy.base import TradeDecision
 
 
 def test_strategy_waits_for_history() -> None:
@@ -111,3 +114,47 @@ def test_monthly_momentum_strategy_respects_min_hold_days() -> None:
 
     third_decision = strategy.decide(prices.iloc[:5], index[4])
     assert third_decision.target_weights == {"US.AAPL": 1.0}
+
+
+def test_core_satellite_strategy_blends_active_sleeve_with_benchmark() -> None:
+    class ActiveStrategy:
+        def __init__(self) -> None:
+            self.reset_calls = 0
+            self.seen_columns: list[str] | None = None
+
+        def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp):
+            self.seen_columns = list(prices.columns)
+            return TradeDecision(
+                as_of=as_of,
+                target_weights={"US.AAPL": 0.6, "US.MSFT": 0.4},
+                reason="active",
+            )
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    active_strategy = ActiveStrategy()
+    strategy = CoreSatelliteStrategy(
+        active_strategy,
+        benchmark_symbol="US.VT",
+        satellite_weight=0.23,
+    )
+
+    prices = pd.DataFrame(
+        {
+            "US.AAPL": [100.0],
+            "US.MSFT": [200.0],
+            "US.VT": [50.0],
+        },
+        index=[pd.Timestamp("2025-01-03")],
+    )
+    decision = strategy.decide(prices, pd.Timestamp("2025-01-03"))
+
+    assert decision.target_weights["US.AAPL"] == pytest.approx(0.138)
+    assert decision.target_weights["US.MSFT"] == pytest.approx(0.092)
+    assert decision.target_weights["US.VT"] == pytest.approx(0.77)
+    assert active_strategy.seen_columns == ["US.AAPL", "US.MSFT"]
+    assert decision.reason == "active:core_satellite=23%/77%"
+
+    strategy.reset()
+    assert active_strategy.reset_calls == 1

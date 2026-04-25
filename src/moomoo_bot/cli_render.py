@@ -24,6 +24,10 @@ def format_ratio(value: float) -> str:
     return f"{value:.2f}"
 
 
+def format_money(value: float) -> str:
+    return f"{value:,.2f}"
+
+
 
 def render_backtest_result(
     result: BacktestResult,
@@ -72,6 +76,100 @@ def render_snapshot(snapshot: pd.DataFrame) -> None:
     console.print(table)
 
 
+def render_execution_report(
+    summary,
+    recent_fills,
+    recent_realizations,
+    recent_orders,
+    symbol_label: str | None = None,
+) -> None:
+    title = "Execution Audit"
+    if symbol_label:
+        title += f" ({symbol_label})"
+
+    summary_table = Table(title=title)
+    summary_table.add_column("Metric", style="cyan", no_wrap=True)
+    summary_table.add_column("Value", style="white")
+    summary_table.add_row("Orders", str(summary.order_count))
+    summary_table.add_row("Pending orders", str(summary.pending_order_count))
+    summary_table.add_row("Fills", str(summary.fill_count))
+    summary_table.add_row("Buy fills", str(summary.buy_fill_count))
+    summary_table.add_row("Sell fills", str(summary.sell_fill_count))
+    summary_table.add_row("Open tax lots", str(summary.open_lot_count))
+    summary_table.add_row("Realizations", str(summary.realization_count))
+    summary_table.add_row("Total fees", format_money(summary.total_fees))
+    summary_table.add_row("Total slippage", format_money(summary.total_slippage))
+    summary_table.add_row("Realized PnL", format_money(summary.realized_pnl))
+    summary_table.add_row("Last fill", str(summary.last_fill_at or "-"))
+    summary_table.add_row(
+        "Last realization", str(summary.last_realization_at or "-")
+    )
+    console.print(summary_table)
+
+    if recent_fills:
+        fills_table = Table(title="Recent Fills")
+        fills_table.add_column("Order ID", style="cyan", no_wrap=True)
+        fills_table.add_column("Symbol")
+        fills_table.add_column("Side")
+        fills_table.add_column("Qty")
+        fills_table.add_column("Fill")
+        fills_table.add_column("Fee")
+        fills_table.add_column("Slip")
+        fills_table.add_column("Time")
+        for fill in recent_fills:
+            fills_table.add_row(
+                str(fill.order_id),
+                fill.symbol,
+                fill.side,
+                f"{fill.fill_quantity:.3f}",
+                f"{fill.fill_price:.2f}",
+                format_money(fill.fee_amount),
+                format_money(fill.slippage_amount),
+                str(fill.filled_at or "-"),
+            )
+        console.print(fills_table)
+
+    if recent_realizations:
+        realizations_table = Table(title="Recent Realizations")
+        realizations_table.add_column("Order ID", style="cyan", no_wrap=True)
+        realizations_table.add_column("Symbol")
+        realizations_table.add_column("Qty")
+        realizations_table.add_column("PnL")
+        realizations_table.add_column("Fee")
+        realizations_table.add_column("Slip")
+        realizations_table.add_column("Closed At")
+        for realization in recent_realizations:
+            realizations_table.add_row(
+                str(realization.sell_order_id or "-"),
+                realization.symbol,
+                f"{realization.quantity:.3f}",
+                format_money(realization.realized_pnl or 0.0),
+                format_money(realization.fee_amount),
+                format_money(realization.slippage_amount),
+                str(realization.closed_at or "-"),
+            )
+        console.print(realizations_table)
+
+    if recent_orders:
+        orders_table = Table(title="Recent Orders")
+        orders_table.add_column("Order ID", style="cyan", no_wrap=True)
+        orders_table.add_column("Symbol")
+        orders_table.add_column("Side")
+        orders_table.add_column("Qty")
+        orders_table.add_column("Price")
+        orders_table.add_column("Status")
+        for order in recent_orders:
+            orders_table.add_row(
+                str(order.order_id or "-"),
+                order.symbol,
+                order.side,
+                f"{order.quantity:.3f}",
+                f"{order.price:.2f}",
+                order.status,
+            )
+        console.print(orders_table)
+
+
 def render_research_results(
     results, benchmark_label: str, universe: str, evaluated_count: int | None = None
 ) -> None:
@@ -87,6 +185,9 @@ def render_research_results(
     table.add_column("Skip")
     table.add_column("Train Excess")
     table.add_column("Test Excess")
+    table.add_column("WF Mean")
+    table.add_column("WF Worst")
+    table.add_column("Regime Worst")
     table.add_column("Full Excess")
     table.add_column("Test CAGR")
     table.add_column("Test Sharpe")
@@ -102,6 +203,9 @@ def render_research_results(
             str(config.skip_days),
             format_percent(result.train_excess),
             format_percent(result.test_excess),
+            format_percent(result.walk_forward_mean_excess),
+            format_percent(result.walk_forward_worst_excess),
+            format_percent(result.regime_worst_excess),
             format_percent(result.full_excess),
             format_percent(result.test_cagr),
             format_ratio(result.test_sharpe),
@@ -141,6 +245,9 @@ def render_satellite_results(
     table.add_column("Satellite")
     table.add_column("Train Excess")
     table.add_column("Test Excess")
+    table.add_column("WF Mean")
+    table.add_column("WF Worst")
+    table.add_column("Regime Worst")
     table.add_column("Full Excess")
     table.add_column("Test CAGR")
     table.add_column("Test Sharpe")
@@ -157,6 +264,9 @@ def render_satellite_results(
             format_percent(result.satellite_weight),
             format_percent(result.train_excess),
             format_percent(result.test_excess),
+            format_percent(result.walk_forward_mean_excess),
+            format_percent(result.walk_forward_worst_excess),
+            format_percent(result.regime_worst_excess),
             format_percent(result.full_excess),
             format_percent(result.test_cagr),
             format_ratio(result.test_sharpe),
@@ -181,7 +291,9 @@ def render_satellite_results(
         best_active = active_results[0]
         console.print(
             f"Best active sleeve among positive weights: satellite={best_active.satellite_weight:.0%}, "
-            f"test excess={format_percent(best_active.test_excess)}, test CAGR={format_percent(best_active.test_cagr)}."
+            f"wf worst={format_percent(best_active.walk_forward_worst_excess)}, "
+            f"regime worst={format_percent(best_active.regime_worst_excess)}, "
+            f"test CAGR={format_percent(best_active.test_cagr)}."
         )
 
 

@@ -34,6 +34,7 @@ class PaperPlan:
     reason: str
     allocations: list[PaperAllocation]
     cash_remaining: float
+    fractional_share_precision: float = 1000.0
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,8 @@ def build_paper_plan(
         raise ValueError("minimum_order_value must not be negative")
     if not 0.0 < max_position_weight <= 1.0:
         raise ValueError("max_position_weight must be between 0 and 1")
+    if fractional_share_precision <= 0.0:
+        raise ValueError("fractional_share_precision must be positive")
 
     latest_prices = prices.loc[: decision.as_of].iloc[-1]
     allocations: list[PaperAllocation] = []
@@ -106,6 +109,7 @@ def build_paper_plan(
         capital=capital,
         reason=decision.reason,
         allocations=allocations,
+        fractional_share_precision=fractional_share_precision,
         cash_remaining=cash_remaining,
     )
 
@@ -126,7 +130,9 @@ def build_paper_rebalance_orders(
     for allocation in plan.allocations:
         current_qty = float(positions.get(allocation.symbol, 0.0))
         raw_delta = allocation.target_quantity - current_qty
-        delta = round_quantity_toward_zero(raw_delta)
+        delta = round_quantity_toward_zero(
+            raw_delta, precision=plan.fractional_share_precision
+        )
         if delta > 0.0:
             instructions.append(
                 PaperOrderInstruction(
@@ -155,7 +161,9 @@ def build_paper_rebalance_orders(
     for symbol, current_qty in positions.items():
         if symbol in target_by_symbol:
             continue
-        sell_qty = round_quantity_toward_zero(float(current_qty))
+        sell_qty = round_quantity_toward_zero(
+            float(current_qty), precision=plan.fractional_share_precision
+        )
         if sell_qty > 0.0:
             if symbol not in prices:
                 raise ValueError(

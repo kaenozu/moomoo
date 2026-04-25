@@ -21,22 +21,27 @@ from moomoo_bot.cli_helpers import (
     load_price_frame as _load_price_frame,
     parse_symbols as _parse_symbols,
     parse_weights as _parse_weights,
+    requires_benchmark_prices as _requires_benchmark_prices,
 )
 from moomoo_bot.cli_render import (
     console,
     format_percent,
     render_backtest_result,
+    render_execution_report,
     render_research_results,
     render_satellite_results,
     render_snapshot,
 )
 from moomoo_bot.config import get_settings
+from moomoo_bot.config import describe_runtime_profile_drift
 from moomoo_bot.research import (
     default_momentum_search_configs,
     default_satellite_weights,
     search_momentum_candidates,
     search_satellite_candidates,
 )
+from moomoo_bot.state import StateStore
+from moomoo_bot.state import resolve_state_db_path
 
 app = typer.Typer(add_completion=False, help="Moomoo bot CLI")
 
@@ -64,12 +69,24 @@ def _require_live_mode(settings, command_name: str, confirm_live_trading: bool) 
 @app.command()
 def status() -> None:
     settings = get_settings()
+    runtime_profile_drift = describe_runtime_profile_drift(settings)
+    resolved_state_db_path = resolve_state_db_path(
+        db_path=settings.state_db_path,
+        execution_mode=settings.execution_mode,
+    )
     table = Table(title="Moomoo Bot Status")
     table.add_column("Key", style="cyan", no_wrap=True)
     table.add_column("Value", style="white")
     table.add_row("OpenD host", settings.opend_host)
     table.add_row("OpenD port", str(settings.opend_port))
     table.add_row("Execution mode", settings.execution_mode)
+    table.add_row("State DB", str(resolved_state_db_path))
+    table.add_row(
+        "Validated profile",
+        "aligned" if not runtime_profile_drift else "custom override",
+    )
+    if runtime_profile_drift:
+        table.add_row("Profile drift", ", ".join(runtime_profile_drift))
     table.add_row("Live trading enabled", str(settings.allow_live_trading))
     table.add_row("Symbols", ", ".join(settings.symbol_list))
     table.add_row("Benchmark", settings.benchmark_symbol)
@@ -84,9 +101,16 @@ def status() -> None:
     )
     table.add_row("Backtest top results", str(settings.backtest_top_results))
     table.add_row("Top N", str(settings.top_n))
+    table.add_row("Satellite weight", format_percent(settings.satellite_weight))
     table.add_row("Initial capital", f"{settings.initial_capital:,.2f}")
     table.add_row("Capital currency", settings.capital_currency)
     table.add_row("JPY/USD rate", f"{settings.fx_jpy_per_usd:,.2f}")
+    table.add_row(
+        "Transaction cost per trade", f"{settings.transaction_cost_per_trade:.2f}"
+    )
+    table.add_row(
+        "Transaction cost bps", f"{settings.transaction_cost_bps:.2f}"
+    )
     table.add_row(
         "Live max position weight", format_percent(settings.live_max_position_weight)
     )
@@ -94,7 +118,54 @@ def status() -> None:
     table.add_row("Market shock drop", format_percent(settings.market_shock_drop_pct))
     table.add_row("Stop loss", format_percent(settings.stop_loss_pct))
     table.add_row("Take profit", format_percent(settings.take_profit_pct))
+    table.add_row("Max daily orders", str(settings.max_daily_orders))
+    table.add_row("Equity retention days", str(settings.equity_retention_days))
     console.print(table)
+
+
+@app.command()
+def execution_report(
+    symbol: str | None = typer.Option(
+        None, help="Optional symbol filter for execution audit output."
+    ),
+    fills_limit: int = typer.Option(
+        10, min=1, max=100, help="Maximum number of recent fills to display."
+    ),
+    realizations_limit: int = typer.Option(
+        10,
+        min=1,
+        max=100,
+        help="Maximum number of recent tax-lot realizations to display.",
+    ),
+    orders_limit: int = typer.Option(
+        10, min=1, max=100, help="Maximum number of recent orders to display."
+    ),
+    db_path: Path | None = typer.Option(
+        None, help="Optional path to an alternate state.db file."
+    ),
+) -> None:
+    settings = get_settings()
+    state_store = StateStore(
+        db_path=db_path or settings.state_db_path,
+        execution_mode=settings.execution_mode,
+    )
+    try:
+        summary = state_store.summarize_execution_activity(symbol=symbol)
+        recent_fills = state_store.get_execution_fills(symbol=symbol, limit=fills_limit)
+        recent_realizations = state_store.get_tax_lot_realizations(
+            symbol=symbol,
+            limit=realizations_limit,
+        )
+        recent_orders = state_store.load_recent_orders(limit=orders_limit)
+        render_execution_report(
+            summary,
+            recent_fills,
+            recent_realizations,
+            recent_orders,
+            symbol_label=symbol,
+        )
+    finally:
+        state_store.close()
 
 
 @app.command()
@@ -177,6 +248,8 @@ def backtest(
         benchmark_series,
         configs=candidate_configs,
         satellite_weights=candidate_weights,
+        transaction_cost_per_trade=settings.transaction_cost_per_trade,
+        transaction_cost_bps=settings.transaction_cost_bps,
     )
     ranked_candidates = sorted(
         candidates, key=lambda result: result.full_excess, reverse=True
@@ -223,17 +296,26 @@ def verify_api(
 
     client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
     try:
+        strategy = _build_monthly_strategy(settings)
         snapshot = client.fetch_market_snapshot([*selected_symbols, benchmark_label])
         price_frame, benchmark_series = client.fetch_price_panel(
-            selected_symbols, benchmark_label, history_days=history_days
+            selected_symbols,
+            benchmark_label,
+            history_days=history_days,
+            include_benchmark_in_prices=_requires_benchmark_prices(strategy),
         )
         if len(price_frame) < settings.warmup_window:
             raise typer.BadParameter(
                 f"Only {len(price_frame)} aligned rows were returned; need at least {settings.warmup_window}."
             )
 
-        strategy = _build_monthly_strategy(settings)
-        result = run_backtest(price_frame, benchmark_series, strategy)
+        result = run_backtest(
+            price_frame,
+            benchmark_series,
+            strategy,
+            transaction_cost_per_trade=settings.transaction_cost_per_trade,
+            transaction_cost_bps=settings.transaction_cost_bps,
+        )
         render_snapshot(snapshot)
         render_backtest_result(result, benchmark_label, ", ".join(price_frame.columns))
     finally:
@@ -269,7 +351,12 @@ def research(
             selected_symbols, benchmark_label, history_days=history_days
         )
         results = search_momentum_candidates(
-            price_frame, benchmark_series, configs=configs, split_ratio=split_ratio
+            price_frame,
+            benchmark_series,
+            configs=configs,
+            split_ratio=split_ratio,
+            transaction_cost_per_trade=settings.transaction_cost_per_trade,
+            transaction_cost_bps=settings.transaction_cost_bps,
         )
         render_research_results(
             results[:max_results],
@@ -319,6 +406,8 @@ def satellite(
             configs=configs,
             satellite_weights=weights,
             split_ratio=split_ratio,
+            transaction_cost_per_trade=settings.transaction_cost_per_trade,
+            transaction_cost_bps=settings.transaction_cost_bps,
         )
         render_satellite_results(
             results[:max_results],

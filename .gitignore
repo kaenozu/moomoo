@@ -13,3 +13,7 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+.moomoo_bot/
+*.db
+*.db-shm
+*.db-wal

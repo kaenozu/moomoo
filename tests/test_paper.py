@@ -172,6 +172,31 @@ def test_build_paper_rebalance_orders_keeps_fractional_buy_orders() -> None:
     ]
 
 
+def test_build_paper_rebalance_orders_use_plan_fractional_precision() -> None:
+    index = pd.date_range("2025-01-01", periods=3, freq="B")
+    prices = pd.DataFrame({"US.AAPL": [100.0, 100.0, 100.0]}, index=index)
+    decision = TradeDecision(
+        as_of=index[-1],
+        target_weights={"US.AAPL": 1.0},
+        reason="monthly_top_momentum:US.AAPL",
+    )
+
+    plan = build_paper_plan(
+        prices,
+        decision,
+        capital=58.0,
+        fractional_share_precision=10.0,
+    )
+    instructions = build_paper_rebalance_orders(
+        plan,
+        current_positions={"US.AAPL": 0.36},
+        latest_prices={"US.AAPL": 100.0},
+    )
+
+    assert len(instructions) == 1
+    assert instructions[0].quantity == pytest.approx(0.1)
+
+
 def test_build_paper_rebalance_orders_uses_eth_session_when_market_closed() -> None:
     index = pd.date_range("2025-01-01", periods=3, freq="B")
     prices = pd.DataFrame(
@@ -254,6 +279,39 @@ def test_get_matching_active_order_tolerates_minor_float_noise() -> None:
 
     assert matching_order is not None
     assert matching_order["order_id"] == "ACTIVE-1"
+
+
+def test_get_matching_active_order_tolerates_truncated_quantity_and_na_flags() -> None:
+    instruction = PaperOrderInstruction(
+        symbol="US.AMD",
+        side=TrdSide.BUY,
+        quantity=1.375,
+        price=305.33,
+        reason="monthly_top_momentum:US.AMD",
+        session=Session.ETH,
+        fill_outside_rth=True,
+    )
+
+    active_frame = pd.DataFrame(
+        {
+            "order_id": ["ACTIVE-AMD"],
+            "order_status": ["SUBMITTED"],
+            "code": ["US.AMD"],
+            "trd_side": ["BUY"],
+            "qty": [1.0],
+            "price": [305.33],
+            "session": ["N/A"],
+            "fill_outside_rth": ["N/A"],
+            "remark": ["monthly_top_momentum:US.AMD"],
+        }
+    )
+
+    client = MoomooPaperTradeClient(trade_context=FakeTradeContext(active_frame))
+
+    matching_order = client.get_matching_active_order(instruction)
+
+    assert matching_order is not None
+    assert matching_order["order_id"] == "ACTIVE-AMD"
 
 
 class FakeTradeContext:

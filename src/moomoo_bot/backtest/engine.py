@@ -14,6 +14,10 @@ import pandas as pd
 from moomoo_bot.strategy.base import Strategy, TradeDecision
 
 
+DEFAULT_TRANSACTION_COST_PER_TRADE = 0.0
+DEFAULT_TRANSACTION_COST_BPS = 2.0
+
+
 @dataclass(frozen=True)
 class BacktestResult:
     equity_curve: pd.Series
@@ -106,8 +110,8 @@ def run_backtest(
     prices: pd.DataFrame,
     benchmark: pd.Series,
     strategy: Strategy,
-    transaction_cost_per_trade: float = 0.0,
-    transaction_cost_bps: float = 0.0,
+    transaction_cost_per_trade: float = DEFAULT_TRANSACTION_COST_PER_TRADE,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
 ) -> BacktestResult:
     if prices.empty:
         raise ValueError("prices must not be empty")
@@ -140,16 +144,20 @@ def run_backtest(
         current_date = dates[index - 1]
         next_date = dates[index]
         history = prices.iloc[:index]
+        current_equity = equity_values[-1]
         decision: TradeDecision = strategy.decide(history, current_date)
         if decision.target_weights != previous_weights:
-            if decision.target_weights:
-                trade_count += 1
-                trade_cost = transaction_cost_per_trade + equity_values[-1] * (
-                    transaction_cost_bps / 10000.0
+            order_count, turnover = _order_level_turnover(
+                previous_weights, decision.target_weights
+            )
+            if order_count > 0:
+                trade_count += order_count
+                trade_cost = (order_count * transaction_cost_per_trade) + (
+                    current_equity * turnover * (transaction_cost_bps / 10000.0)
                 )
                 transaction_costs_paid += trade_cost
-                equity_values[-1] -= trade_cost
-            previous_weights = decision.target_weights
+                current_equity -= trade_cost
+            previous_weights = dict(decision.target_weights)
 
         next_returns = prices.loc[next_date].div(prices.loc[current_date]).sub(1.0)
         portfolio_return = sum(
@@ -162,7 +170,7 @@ def run_backtest(
 
         portfolio_returns.append(portfolio_return)
         benchmark_returns.append(benchmark_return)
-        equity_values.append(equity_values[-1] * (1.0 + portfolio_return))
+        equity_values.append(current_equity * (1.0 + portfolio_return))
         benchmark_values.append(benchmark_values[-1] * (1.0 + benchmark_return))
 
     equity_curve = pd.Series(equity_values, index=dates, name="equity")
@@ -242,6 +250,24 @@ def max_drawdown(curve: pd.Series) -> float:
 
 _annualized_return = annualized_return
 _sharpe_ratio = sharpe_ratio
+
+
+def _order_level_turnover(
+    previous_weights: dict[str, float], current_weights: dict[str, float]
+) -> tuple[int, float]:
+    order_count = 0
+    turnover = 0.0
+    symbols = set(previous_weights) | set(current_weights)
+    for symbol in symbols:
+        delta = abs(
+            float(current_weights.get(symbol, 0.0))
+            - float(previous_weights.get(symbol, 0.0))
+        )
+        if delta <= 1e-12:
+            continue
+        order_count += 1
+        turnover += delta
+    return order_count, turnover
 
 
 def sortino_ratio(returns: pd.Series) -> float:

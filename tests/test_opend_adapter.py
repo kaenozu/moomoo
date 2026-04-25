@@ -23,6 +23,24 @@ def test_combine_price_series_uses_shared_dates_and_benchmark() -> None:
     assert prices.iloc[-1].to_dict() == {"US.AAPL": 102.0, "US.MSFT": 202.0}
 
 
+def test_combine_price_series_can_keep_benchmark_in_tradable_frame() -> None:
+    index = pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-03"])
+    series_by_symbol = {
+        "US.AAPL": pd.Series([100.0, 101.0, 102.0], index=index, name="US.AAPL"),
+        "US.MSFT": pd.Series([200.0, 201.0, 202.0], index=index, name="US.MSFT"),
+        "US.VT": pd.Series([50.0, 51.0, 52.0], index=index, name="US.VT"),
+    }
+
+    prices, benchmark = combine_price_series(
+        series_by_symbol,
+        "US.VT",
+        include_benchmark_in_prices=True,
+    )
+
+    assert list(prices.columns) == ["US.AAPL", "US.MSFT", "US.VT"]
+    assert benchmark.iloc[-1] == 52.0
+
+
 def test_fetch_history_combines_pages_and_sorts_rows() -> None:
     fake_context = FakeQuoteContext()
     client = MoomooOpenDClient(quote_context=fake_context)

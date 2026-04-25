@@ -138,10 +138,13 @@ def build_liquidation_orders(
     reason: str,
     session: Session = Session.NONE,
     fill_outside_rth: bool = False,
+    fractional_share_precision: float = 1000.0,
 ) -> list[PaperOrderInstruction]:
     orders: list[PaperOrderInstruction] = []
     for symbol, quantity in positions.items():
-        sell_qty = round_quantity_toward_zero(quantity)
+        sell_qty = round_quantity_toward_zero(
+            quantity, precision=fractional_share_precision
+        )
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
@@ -167,6 +170,7 @@ def build_stop_loss_take_profit_orders(
     take_profit_pct: float,
     session: Session = Session.NONE,
     fill_outside_rth: bool = False,
+    fractional_share_precision: float = 1000.0,
 ) -> list[PaperOrderInstruction]:
     if position_rows.empty:
         return []
@@ -182,7 +186,9 @@ def build_stop_loss_take_profit_orders(
         )
         if quantity is None or quantity <= 0.0:
             continue
-        quantity = round_quantity_toward_zero(quantity)
+        quantity = round_quantity_toward_zero(
+            quantity, precision=fractional_share_precision
+        )
         if quantity <= 0.0:
             continue
 
