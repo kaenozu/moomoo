@@ -84,7 +84,9 @@ def _clear_state_files(state_store: StateStore) -> None:
     state_store.close()
     db_path = state_store.db_path
     for suffix in ("", "-wal", "-shm"):
-        candidate = db_path if suffix == "" else db_path.with_name(db_path.name + suffix)
+        candidate = (
+            db_path if suffix == "" else db_path.with_name(db_path.name + suffix)
+        )
         if candidate.exists():
             candidate.unlink()
 
@@ -113,7 +115,9 @@ def run_paper_repair(
     owns_trade_client = trade_client is None
     owns_state_store = state_store is None
     if owns_quote_client:
-        quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
+        quote_client = MoomooOpenDClient(
+            host=settings.opend_host, port=settings.opend_port
+        )
     if owns_trade_client:
         trade_client = MoomooPaperTradeClient(
             host=settings.opend_host, port=settings.opend_port, trd_env=TrdEnv.SIMULATE
@@ -136,7 +140,9 @@ def run_paper_repair(
 
         market_state = _fetch_market_state(quote_client, benchmark_symbol)
         market_open = _is_regular_market_open(market_state)
-        latest_prices = snapshot_latest_prices(quote_client, list(signed_positions.keys()))
+        latest_prices = snapshot_latest_prices(
+            quote_client, list(signed_positions.keys())
+        )
         repair_orders = _build_paper_repair_orders(
             position_frame,
             latest_prices,
@@ -162,7 +168,9 @@ def run_paper_repair(
 
         if clear_local_state:
             matching_active_order = False
-            get_matching_active_order = getattr(trade_client, "get_matching_active_order", None)
+            get_matching_active_order = getattr(
+                trade_client, "get_matching_active_order", None
+            )
             if callable(get_matching_active_order):
                 matching_active_order = any(
                     get_matching_active_order(order, refresh_cache=True) is not None

@@ -1,8 +1,7 @@
 """Tests for kill switch module."""
 
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pytest
 
 from moomoo_bot.kill_switch import (

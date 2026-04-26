@@ -34,7 +34,6 @@ from moomoo_bot.notify import (
     notify_risk_stop as _notify_risk_stop,
 )
 from moomoo_bot.paper import (
-    PaperOrderInstruction,
     PaperPlan,
     build_paper_rebalance_orders,
 )
@@ -56,6 +55,7 @@ from moomoo_bot.orchestrator.helpers import (
     daily_loss_reference,
     daily_order_cap_reason,
     effective_max_position_weight,
+    is_daily_loss_halt,
     kill_switch_message,
     market_date_for_frame,
     overlay_latest_prices,
@@ -75,9 +75,6 @@ logger = logging.getLogger(__name__)
 
 
 def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
-    from moomoo_bot.orchestrator.helpers import (
-        snapshot_latest_prices as _snap,
-    )
     from moomoo_bot.row_utils import row_text, row_float
 
     pending_order_id = (
@@ -262,12 +259,18 @@ def _run_risk_checks(
 ) -> tuple[bool, bool]:
     if risk_state.halted and is_daily_loss_halt(risk_state.halted_reason):
         save_risk_state(
-            state_store, risk_state, persistent_risk_state, market_date, account_value,
+            state_store,
+            risk_state,
+            persistent_risk_state,
+            market_date,
+            account_value,
         )
         liquidation_orders = build_risk_liquidation_orders(
-            current_positions, latest_prices,
+            current_positions,
+            latest_prices,
             risk_state.halted_reason or "daily_loss_limit",
-            settings, market_open,
+            settings,
+            market_open,
         )
         if auto_mode:
             console.print(
@@ -278,42 +281,62 @@ def _run_risk_checks(
                 f"Trading halted for market date {market_date}: {risk_state.halted_reason}"
             )
         render_and_submit_risk_liquidation(
-            trade_client, liquidation_orders, current_positions, mode_label,
-            submit_orders=submit_orders, state_store=state_store,
+            trade_client,
+            liquidation_orders,
+            current_positions,
+            mode_label,
+            submit_orders=submit_orders,
+            state_store=state_store,
         )
         return True, False
 
     shock_reason = detect_market_shock(
-        benchmark_series, settings.market_shock_drop_pct,
+        benchmark_series,
+        settings.market_shock_drop_pct,
     )
     if shock_reason:
         save_risk_state(
-            state_store, risk_state, persistent_risk_state, market_date, account_value,
+            state_store,
+            risk_state,
+            persistent_risk_state,
+            market_date,
+            account_value,
         )
         logger.warning("Risk stop: %s", shock_reason)
         console.print(f"Risk stop: {shock_reason}")
         render_risk_orders([], current_positions, "Risk Stop Orders")
         peak = risk_state.peak_account_value or account_value
         _notify_risk_stop(
-            webhook_str(settings), reason=shock_reason,
-            account_value=account_value, peak_value=peak,
+            webhook_str(settings),
+            reason=shock_reason,
+            account_value=account_value,
+            peak_value=peak,
             drawdown_pct=(peak - account_value) / peak if peak > 0 else 0.0,
         )
         return True, False
 
     dl_reason = detect_daily_loss_limit(
         daily_loss_reference(state_store, market_date),
-        account_value, settings.daily_loss_limit_pct,
+        account_value,
+        settings.daily_loss_limit_pct,
     )
     if dl_reason:
         risk_state.halted = True
         risk_state.halted_reason = dl_reason
         risk_state.drawdown_tier = max(risk_state.drawdown_tier, 2)
         save_risk_state(
-            state_store, risk_state, persistent_risk_state, market_date, account_value,
+            state_store,
+            risk_state,
+            persistent_risk_state,
+            market_date,
+            account_value,
         )
         liquidation_orders = build_risk_liquidation_orders(
-            current_positions, latest_prices, dl_reason, settings, market_open,
+            current_positions,
+            latest_prices,
+            dl_reason,
+            settings,
+            market_open,
         )
         console.print(f"Daily loss limit triggered: {dl_reason}")
         daily_ref = daily_loss_reference(state_store, market_date) or account_value
@@ -323,8 +346,12 @@ def _run_risk_checks(
             account_value=account_value,
         )
         render_and_submit_risk_liquidation(
-            trade_client, liquidation_orders, current_positions, mode_label,
-            submit_orders=submit_orders, state_store=state_store,
+            trade_client,
+            liquidation_orders,
+            current_positions,
+            mode_label,
+            submit_orders=submit_orders,
+            state_store=state_store,
         )
         return True, False
 
@@ -335,23 +362,35 @@ def _run_risk_checks(
         else None
     )
     monthly_loss_reason = detect_monthly_loss_limit(
-        month_start_equity, account_value, settings.monthly_loss_limit_pct,
+        month_start_equity,
+        account_value,
+        settings.monthly_loss_limit_pct,
     )
     if monthly_loss_reason:
         risk_state.halted = True
         risk_state.halted_reason = monthly_loss_reason
         risk_state.drawdown_tier = max(risk_state.drawdown_tier, 2)
         save_risk_state(
-            state_store, risk_state, persistent_risk_state, market_date, account_value,
+            state_store,
+            risk_state,
+            persistent_risk_state,
+            market_date,
+            account_value,
         )
         liquidation_orders = build_risk_liquidation_orders(
-            current_positions, latest_prices, monthly_loss_reason, settings, market_open,
+            current_positions,
+            latest_prices,
+            monthly_loss_reason,
+            settings,
+            market_open,
         )
         console.print(f"Monthly loss limit triggered: {monthly_loss_reason}")
         peak = risk_state.peak_account_value or account_value
         _notify_risk_stop(
-            webhook_str(settings), reason=monthly_loss_reason,
-            account_value=account_value, peak_value=peak,
+            webhook_str(settings),
+            reason=monthly_loss_reason,
+            account_value=account_value,
+            peak_value=peak,
             drawdown_pct=(
                 (month_start_equity - account_value) / month_start_equity
                 if month_start_equity and month_start_equity > 0
@@ -359,21 +398,35 @@ def _run_risk_checks(
             ),
         )
         render_and_submit_risk_liquidation(
-            trade_client, liquidation_orders, current_positions, mode_label,
-            submit_orders=submit_orders, state_store=state_store,
+            trade_client,
+            liquidation_orders,
+            current_positions,
+            mode_label,
+            submit_orders=submit_orders,
+            state_store=state_store,
         )
         return True, False
 
     drawdown_reason = update_drawdown_state(
-        account_value, risk_state,
-        settings.max_drawdown_pct, settings.max_drawdown_reset_pct,
+        account_value,
+        risk_state,
+        settings.max_drawdown_pct,
+        settings.max_drawdown_reset_pct,
     )
     if drawdown_reason:
         save_risk_state(
-            state_store, risk_state, persistent_risk_state, market_date, account_value,
+            state_store,
+            risk_state,
+            persistent_risk_state,
+            market_date,
+            account_value,
         )
         liquidation_orders = build_risk_liquidation_orders(
-            current_positions, latest_prices, drawdown_reason, settings, market_open,
+            current_positions,
+            latest_prices,
+            drawdown_reason,
+            settings,
+            market_open,
         )
         render_paper_plan(
             PaperPlan(
@@ -392,24 +445,32 @@ def _run_risk_checks(
                 f"Capital input: {account_value:,.2f} USD (from {mode_label} account)"
             )
         else:
-            console.print(
-                f"Capital input: {capital:,.2f} {settings.capital_currency}"
-            )
+            console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
             console.print(f"Capital used for sizing: {account_value:,.2f} USD")
         peak = risk_state.peak_account_value or account_value
         _notify_risk_stop(
-            webhook_str(settings), reason=drawdown_reason,
-            account_value=account_value, peak_value=peak,
+            webhook_str(settings),
+            reason=drawdown_reason,
+            account_value=account_value,
+            peak_value=peak,
             drawdown_pct=(peak - account_value) / peak if peak > 0 else 0.0,
         )
         render_and_submit_risk_liquidation(
-            trade_client, liquidation_orders, current_positions, mode_label,
-            submit_orders=submit_orders, state_store=state_store,
+            trade_client,
+            liquidation_orders,
+            current_positions,
+            mode_label,
+            submit_orders=submit_orders,
+            state_store=state_store,
         )
         return True, False
 
     save_risk_state(
-        state_store, risk_state, persistent_risk_state, market_date, account_value,
+        state_store,
+        risk_state,
+        persistent_risk_state,
+        market_date,
+        account_value,
     )
 
     ev_should_reduce = False
@@ -428,23 +489,35 @@ def _run_risk_checks(
             risk_state.halted_reason = ev_halt_reason
             risk_state.drawdown_tier = max(risk_state.drawdown_tier, 2)
             save_risk_state(
-                state_store, risk_state, persistent_risk_state,
-                market_date, account_value,
+                state_store,
+                risk_state,
+                persistent_risk_state,
+                market_date,
+                account_value,
             )
             liquidation_orders = build_risk_liquidation_orders(
-                current_positions, latest_prices, ev_halt_reason,
-                settings, market_open,
+                current_positions,
+                latest_prices,
+                ev_halt_reason,
+                settings,
+                market_open,
             )
             console.print(f"EV halt triggered: {ev_halt_reason}")
             peak = risk_state.peak_account_value or account_value
             _notify_risk_stop(
-                webhook_str(settings), reason=ev_halt_reason,
-                account_value=account_value, peak_value=peak,
+                webhook_str(settings),
+                reason=ev_halt_reason,
+                account_value=account_value,
+                peak_value=peak,
                 drawdown_pct=(peak - account_value) / peak if peak > 0 else 0.0,
             )
             render_and_submit_risk_liquidation(
-                trade_client, liquidation_orders, current_positions, mode_label,
-                submit_orders=submit_orders, state_store=state_store,
+                trade_client,
+                liquidation_orders,
+                current_positions,
+                mode_label,
+                submit_orders=submit_orders,
+                state_store=state_store,
             )
             return True, False
         if ev_should_reduce:
@@ -495,6 +568,7 @@ def execute_trading_cycle(
         logger.warning(message)
         console.print(message)
         from moomoo_bot.notify import notify_kill_switch
+
         notify_kill_switch(webhook_str(settings))
         return False
 
@@ -551,8 +625,12 @@ def execute_trading_cycle(
         persistent_risk_state = state_store.load_risk_state()
         risk_state = restore_risk_state(persistent_risk_state)
         if buying_power_usd is not None and buying_power_usd <= 0.0:
-            logger.warning("Paper account has no positive buying power; attempting repair.")
-            console.print("Paper account has no positive buying power; attempting repair.")
+            logger.warning(
+                "Paper account has no positive buying power; attempting repair."
+            )
+            console.print(
+                "Paper account has no positive buying power; attempting repair."
+            )
             return _orch_module.run_paper_repair(
                 settings=settings,
                 benchmark_symbol=benchmark_label,
@@ -697,12 +775,14 @@ def execute_trading_cycle(
             render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
             if submit_orders:
                 console.print(f"Submitting {mode_label} risk exit orders...")
-                submitted_risk_orders = _orch_module._submit_orders_with_duplicate_guard(
-                    trade_client,
-                    risk_orders,
-                    mode_label,
-                    render_order_response,
-                    state_store=state_store,
+                submitted_risk_orders = (
+                    _orch_module._submit_orders_with_duplicate_guard(
+                        trade_client,
+                        risk_orders,
+                        mode_label,
+                        render_order_response,
+                        state_store=state_store,
+                    )
                 )
                 record_submitted_order_count(
                     state_store,

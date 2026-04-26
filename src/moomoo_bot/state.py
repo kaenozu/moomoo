@@ -12,7 +12,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _DEFAULT_DB_DIR = Path.home() / ".moomoo_bot"
 _DEFAULT_DB_NAME = "state.db"
@@ -464,7 +464,11 @@ class StateStore:
 
         previous_filled_quantity = float(order_row["filled_quantity"] or 0.0)
         new_filled_quantity = max(float(filled_quantity), previous_filled_quantity)
-        fill_delta = (new_filled_quantity - previous_filled_quantity) if (new_filled_quantity - previous_filled_quantity) > 1e-6 else 0.0
+        fill_delta = (
+            (new_filled_quantity - previous_filled_quantity)
+            if (new_filled_quantity - previous_filled_quantity) > 1e-6
+            else 0.0
+        )
 
         previous_fee_total = float(order_row["cumulative_fee_amount"] or 0.0)
         new_fee_total = previous_fee_total

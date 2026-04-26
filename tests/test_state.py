@@ -2,7 +2,6 @@
 
 import pytest
 from pathlib import Path
-from datetime import datetime, timezone, date as datetime_date
 import sqlite3
 
 from moomoo_bot.state import (
@@ -10,7 +9,6 @@ from moomoo_bot.state import (
     StateStore,
     PersistentRiskState,
     OrderRecord,
-    EquitySnapshot,
     resolve_state_db_path,
 )
 

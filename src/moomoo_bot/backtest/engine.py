@@ -367,9 +367,7 @@ def run_walk_forward_backtest(
     total_days = len(dates)
     min_required = train_period_days + test_period_days
     if total_days < min_required:
-        raise ValueError(
-            f"Not enough data: need {min_required} rows, got {total_days}"
-        )
+        raise ValueError(f"Not enough data: need {min_required} rows, got {total_days}")
 
     folds: list[WalkForwardFold] = []
     fold_index = 0
@@ -381,7 +379,7 @@ def run_walk_forward_backtest(
             break
 
         train_prices = prices.iloc[start_pos:train_end_pos]
-        train_benchmark = benchmark.iloc[start_pos:train_end_pos]
+        benchmark.iloc[start_pos:train_end_pos]
         test_prices = prices.iloc[train_end_pos - 1 : test_end_pos]
         test_benchmark = benchmark.iloc[train_end_pos - 1 : test_end_pos]
 

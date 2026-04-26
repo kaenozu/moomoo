@@ -61,9 +61,7 @@ def status() -> None:
     table.add_row(
         "Transaction cost per trade", f"{settings.transaction_cost_per_trade:.2f}"
     )
-    table.add_row(
-        "Transaction cost bps", f"{settings.transaction_cost_bps:.2f}"
-    )
+    table.add_row("Transaction cost bps", f"{settings.transaction_cost_bps:.2f}")
     table.add_row(
         "Live max position weight", format_percent(settings.live_max_position_weight)
     )
@@ -154,7 +152,9 @@ def performance(
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         pl_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else float("inf")
         avg_pnl = sum(pnls) / len(pnls) if pnls else 0.0
-        avg_opening = sum(opening_prices) / len(opening_prices) if opening_prices else 1.0
+        avg_opening = (
+            sum(opening_prices) / len(opening_prices) if opening_prices else 1.0
+        )
         ev_ratio = avg_pnl / avg_opening if avg_opening > 0 else 0.0
 
         fill_summary = state_store.summarize_execution_activity()

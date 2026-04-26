@@ -320,4 +320,3 @@ class DynamicCoreSatelliteStrategy(CoreSatelliteStrategy):
             target_weights=result.target_weights,
             reason=f"{result.reason}:regime={regime_label}:sat={self.satellite_weight:.0%}",
         )
-

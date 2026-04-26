@@ -1,6 +1,5 @@
 """Extended tests for risk module."""
 
-import pytest
 import pandas as pd
 from moomoo_bot.risk import (
     RiskState,

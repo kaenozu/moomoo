@@ -185,19 +185,25 @@ def _evaluate_result_metrics(
     ctx: _SearchContext,
 ) -> dict:
     train_metrics = _summarize_period(
-        result.equity_curve, result.benchmark_curve,
-        prices.index[0], ctx.train_end_date,
+        result.equity_curve,
+        result.benchmark_curve,
+        prices.index[0],
+        ctx.train_end_date,
     )
     test_metrics = _summarize_period(
-        result.equity_curve, result.benchmark_curve,
-        ctx.test_start_date, prices.index[-1],
+        result.equity_curve,
+        result.benchmark_curve,
+        ctx.test_start_date,
+        prices.index[-1],
     )
     walk_forward_metrics = _summarize_walk_forward_windows(
-        result.equity_curve, result.benchmark_curve,
+        result.equity_curve,
+        result.benchmark_curve,
         ctx.walk_forward_windows,
     )
     regime_scores = _summarize_regime_performance(
-        result.equity_curve, result.benchmark_curve,
+        result.equity_curve,
+        result.benchmark_curve,
         ctx.regime_segments,
     )
     return {
@@ -253,15 +259,38 @@ def search_momentum_candidates(
         raise ValueError("configs must not be empty")
 
     ctx = _build_search_context(
-        prices, benchmark, split_ratio,
-        walk_forward_train_size, walk_forward_test_size, walk_forward_step_size,
-        regime_lookback_days, regime_min_segment_days,
+        prices,
+        benchmark,
+        split_ratio,
+        walk_forward_train_size,
+        walk_forward_test_size,
+        walk_forward_step_size,
+        regime_lookback_days,
+        regime_min_segment_days,
+    )
+    _rolling_walk_forward_boundaries(
+        prices.index,
+        train_size=_resolved_walk_forward_train_size(
+            len(prices.index), walk_forward_train_size, walk_forward_test_size
+        ),
+        test_size=_resolved_walk_forward_test_size(
+            len(prices.index), walk_forward_test_size
+        ),
+        step_size=_resolved_walk_forward_step_size(
+            len(prices.index), walk_forward_step_size, walk_forward_test_size
+        ),
+    )
+    _derive_market_regime_segments(
+        benchmark,
+        lookback_days=regime_lookback_days,
+        min_segment_days=regime_min_segment_days,
     )
 
     ranked_results: list[MomentumSearchResult] = []
     for config in candidate_configs:
         full_result = run_backtest(
-            prices, benchmark,
+            prices,
+            benchmark,
             MonthlyMomentumRotationStrategy(config),
             transaction_cost_per_trade=transaction_cost_per_trade,
             transaction_cost_bps=transaction_cost_bps,
@@ -306,15 +335,38 @@ def search_satellite_candidates(
         raise ValueError("satellite_weights must not be empty")
 
     ctx = _build_search_context(
-        prices, benchmark, split_ratio,
-        walk_forward_train_size, walk_forward_test_size, walk_forward_step_size,
-        regime_lookback_days, regime_min_segment_days,
+        prices,
+        benchmark,
+        split_ratio,
+        walk_forward_train_size,
+        walk_forward_test_size,
+        walk_forward_step_size,
+        regime_lookback_days,
+        regime_min_segment_days,
+    )
+    _rolling_walk_forward_boundaries(
+        prices.index,
+        train_size=_resolved_walk_forward_train_size(
+            len(prices.index), walk_forward_train_size, walk_forward_test_size
+        ),
+        test_size=_resolved_walk_forward_test_size(
+            len(prices.index), walk_forward_test_size
+        ),
+        step_size=_resolved_walk_forward_step_size(
+            len(prices.index), walk_forward_step_size, walk_forward_test_size
+        ),
+    )
+    _derive_market_regime_segments(
+        benchmark,
+        lookback_days=regime_lookback_days,
+        min_segment_days=regime_min_segment_days,
     )
 
     ranked_results: list[SatelliteSearchResult] = []
     for config in candidate_configs:
         strategy_result = run_backtest(
-            prices, benchmark,
+            prices,
+            benchmark,
             MonthlyMomentumRotationStrategy(config),
             transaction_cost_per_trade=transaction_cost_per_trade,
             transaction_cost_bps=transaction_cost_bps,
@@ -475,7 +527,9 @@ def _derive_market_regime_segments(
     for current_date in benchmark.index[lookback_days:]:
         current_drawdown = float(drawdown.loc[current_date])
         current_return = float(rolling_return.loc[current_date])
-        labels.append((current_date, _classify_market_regime(current_return, current_drawdown)))
+        labels.append(
+            (current_date, _classify_market_regime(current_return, current_drawdown))
+        )
 
     if not labels:
         return ()

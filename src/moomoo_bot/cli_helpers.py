@@ -136,9 +136,7 @@ def submit_orders_with_duplicate_guard(
             _render_unsupported_order_skip(mode_label, instruction, skip_reason)
             continue
 
-        duplicate_order = _find_duplicate_order(
-            state_store, trade_client, instruction
-        )
+        duplicate_order = _find_duplicate_order(state_store, trade_client, instruction)
         if duplicate_order is not None:
             _render_duplicate_skip(
                 mode_label,
@@ -158,7 +156,9 @@ def submit_orders_with_duplicate_guard(
     return submitted_count
 
 
-def _find_duplicate_order(state_store, trade_client, instruction) -> dict[str, object] | None:
+def _find_duplicate_order(
+    state_store, trade_client, instruction
+) -> dict[str, object] | None:
     pending_state_order = _find_matching_pending_state_order(
         state_store,
         instruction,
@@ -211,9 +211,7 @@ def _submit_single_order(
         response = trade_client.submit_order(instruction)
         render_func(instruction, response)
         if state_store is not None:
-            order_record = _build_order_record(
-                trade_client, instruction, response
-            )
+            order_record = _build_order_record(trade_client, instruction, response)
             if order_record is not None:
                 _persist_order_and_immediate_fill(
                     state_store,
@@ -294,6 +292,7 @@ def _persist_order_and_immediate_fill(state_store, order_record, response) -> No
         ),
     )
 
+
 def _build_order_record(trade_client, instruction, response):
     from moomoo_bot.state import OrderRecord
 
@@ -312,7 +311,9 @@ def _build_order_record(trade_client, instruction, response):
     if order_id is None:
         _logger.warning(
             "Could not determine order_id for %s %s qty=%.3f; skipping record.",
-            instruction.side, instruction.symbol, instruction.quantity,
+            instruction.side,
+            instruction.symbol,
+            instruction.quantity,
         )
         return None
 

@@ -288,6 +288,7 @@ def test_run_one_shot_trade_forwards_explicit_position_cap(monkeypatch) -> None:
     assert captured["fractional_share_precision"] == settings.fractional_share_precision
 
 
+
 def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
     settings = Settings(
         symbols="US.AAPL",
@@ -416,6 +417,7 @@ def test_run_one_shot_trade_caps_paper_capital_to_buying_power(monkeypatch) -> N
     )
 
     assert captured["capital"] == 200.0
+
 
 
 def test_run_one_shot_trade_halves_position_cap_at_drawdown_tier_one(monkeypatch) -> None:
@@ -1053,7 +1055,6 @@ class FakeTradeClient:
 
     def get_account_value(self):
         return self.account_value
-
     def get_buying_power(self):
         return self.buying_power if self.buying_power is not None else self.account_value
 

@@ -48,7 +48,6 @@ def backtest(
     ),
 ) -> None:
     from moomoo_bot.backtest import make_demo_prices
-    from moomoo_bot.broker import MoomooOpenDClient
     from moomoo_bot.cli_helpers import (
         parse_symbols as _parse_symbols,
         load_benchmark_series as _load_benchmark_series,
@@ -339,9 +338,7 @@ def validate(
     base_cost_bps: float = typer.Option(
         None, min=0.0, help="Base transaction cost in bps. Defaults to config value."
     ),
-    walk_forward: bool = typer.Option(
-        True, help="Also run walk-forward analysis."
-    ),
+    walk_forward: bool = typer.Option(True, help="Also run walk-forward analysis."),
     train_days: int = typer.Option(
         504, min=126, help="Walk-forward training window in trading days."
     ),
@@ -367,15 +364,15 @@ def validate(
     )
 
     settings = _cli.get_settings()
-    selected_symbols = (
-        _cli._parse_symbols(symbols) if symbols else settings.symbol_list
-    )
+    selected_symbols = _cli._parse_symbols(symbols) if symbols else settings.symbol_list
     if symbols:
         from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
         selected_symbols = _parse_symbols(symbols) or settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
-    resolved_base_bps = base_cost_bps if base_cost_bps is not None else settings.transaction_cost_bps
+    resolved_base_bps = (
+        base_cost_bps if base_cost_bps is not None else settings.transaction_cost_bps
+    )
 
     if prices_csv is None:
         price_frame, benchmark_series = make_demo_prices(

@@ -65,7 +65,9 @@ def run_auto_monitor(
     if settings.health_check_enabled:
         health_server = HealthCheckServer(port=settings.health_check_port)
         health_server.start()
-        logger.info("Health check server started on port %d", settings.health_check_port)
+        logger.info(
+            "Health check server started on port %d", settings.health_check_port
+        )
 
     owns_state_store = state_store is None
     if owns_state_store:
@@ -132,14 +134,28 @@ def run_auto_monitor(
                     latest_equity.account_value if latest_equity is not None else None
                 )
 
-                if current_date is not None and last_summary_date is not None and current_date != last_summary_date:
-                    prev_equity = state_store.get_latest_equity_before_market_date(current_date)
-                    prev_value = prev_equity.account_value if prev_equity else current_value
-                    if current_value is not None and prev_value is not None and prev_value > 0:
+                if (
+                    current_date is not None
+                    and last_summary_date is not None
+                    and current_date != last_summary_date
+                ):
+                    prev_equity = state_store.get_latest_equity_before_market_date(
+                        current_date
+                    )
+                    prev_value = (
+                        prev_equity.account_value if prev_equity else current_value
+                    )
+                    if (
+                        current_value is not None
+                        and prev_value is not None
+                        and prev_value > 0
+                    ):
                         peak_state = state_store.load_risk_state()
                         peak = peak_state.peak_account_value or current_value
                         day_return = (current_value - prev_value) / prev_value
-                        month_start_equity = state_store.get_equity_at_month_start(current_date)
+                        month_start_equity = state_store.get_equity_at_month_start(
+                            current_date
+                        )
                         initial_value = (
                             month_start_equity.account_value
                             if month_start_equity is not None
@@ -152,7 +168,9 @@ def run_auto_monitor(
                         )
                         drawdown = (peak - current_value) / peak if peak > 0 else 0.0
                         try:
-                            positions = _json.loads(latest_equity.positions_json or "{}")
+                            positions = _json.loads(
+                                latest_equity.positions_json or "{}"
+                            )
                         except Exception:
                             positions = {}
                         notify_daily_summary(

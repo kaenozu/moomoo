@@ -11,8 +11,7 @@ def floor_quantity(quantity: float, precision: float = 1000.0) -> float:
     """Round toward zero using the requested fractional-share precision."""
     normalized_precision = _normalize_precision(precision)
     normalized_quantity = (
-        floor(abs(float(quantity)) * normalized_precision + 1e-9)
-        / normalized_precision
+        floor(abs(float(quantity)) * normalized_precision + 1e-9) / normalized_precision
     )
     return float(normalized_quantity) if normalized_quantity > 0 else 0.0
 
@@ -25,8 +24,7 @@ def round_quantity_toward_zero(quantity: float, precision: float = 1000.0) -> fl
 
     normalized_precision = _normalize_precision(precision)
     normalized_quantity = (
-        floor(abs(signed_quantity) * normalized_precision + 1e-9)
-        / normalized_precision
+        floor(abs(signed_quantity) * normalized_precision + 1e-9) / normalized_precision
     )
     if normalized_quantity <= 0.0:
         return 0.0
