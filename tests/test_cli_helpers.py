@@ -117,3 +117,37 @@ def test_submit_orders_skips_duplicate_when_pending_exists_in_state(tmp_path) ->
         assert trade_client.submit_calls == 0
     finally:
         state_store.close()
+
+
+def test_submit_orders_skips_buy_orders_below_one_share(tmp_path) -> None:
+    state_store = StateStore(db_path=tmp_path / "state.db")
+    trade_client = FakeTradeClient(
+        pd.DataFrame(
+            {
+                "order_id": ["unused"],
+                "order_status": ["SUBMITTED"],
+                "filled_quantity": [0.0],
+            }
+        )
+    )
+    instruction = PaperOrderInstruction(
+        symbol="US.AMD",
+        side=TrdSide.BUY,
+        quantity=0.431,
+        price=347.81,
+        reason="monthly_top_momentum:US.AMD",
+    )
+
+    try:
+        submitted_count = submit_orders_with_duplicate_guard(
+            trade_client,
+            [instruction],
+            "paper",
+            lambda *_args, **_kwargs: None,
+            state_store=state_store,
+        )
+
+        assert submitted_count == 0
+        assert trade_client.submit_calls == 0
+    finally:
+        state_store.close()

@@ -392,3 +392,29 @@ def test_paper_trade_client_raises_data_error_for_empty_account_info() -> None:
         assert "did not return rows" in str(exc).lower()
     else:
         raise AssertionError("Expected DataError")
+
+
+def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
+    from unittest.mock import MagicMock
+    import pandas as pd
+
+    mock_ctx = MagicMock()
+    mock_ctx.accinfo_query.return_value = (
+        0,
+        pd.DataFrame(
+            [
+                {
+                    "total_assets": 666.67,
+                    "power": 123.45,
+                    "available_funds": 200.0,
+                }
+            ]
+        ),
+    )
+
+    client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
+    from moomoo import TrdEnv
+    client.trade_context = mock_ctx
+    client.trd_env = TrdEnv.SIMULATE
+
+    assert client.get_buying_power() == 200.0

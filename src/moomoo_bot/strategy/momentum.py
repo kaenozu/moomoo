@@ -265,3 +265,58 @@ class CoreSatelliteStrategy:
             target_weights=active_weights,
             reason=f"{decision.reason}:core_satellite={self.satellite_weight:.0%}/{(1.0 - self.satellite_weight):.0%}",
         )
+
+
+class DynamicCoreSatelliteStrategy(CoreSatelliteStrategy):
+    """CoreSatelliteStrategy with regime-adaptive satellite weight.
+
+    When the benchmark is trending up (price > N-day SMA) the full
+    ``satellite_weight_bull`` is used to maximise active exposure.
+    When the benchmark falls below its moving average the satellite weight
+    drops to ``satellite_weight_bear``, reducing active risk automatically.
+    """
+
+    def __init__(
+        self,
+        strategy: Strategy,
+        benchmark_symbol: str,
+        satellite_weight_bull: float = 0.45,
+        satellite_weight_bear: float = 0.20,
+        trend_days: int = 200,
+    ) -> None:
+        if not 0.0 <= satellite_weight_bull <= 1.0:
+            raise ValueError("satellite_weight_bull must be between 0.0 and 1.0")
+        if not 0.0 <= satellite_weight_bear <= 1.0:
+            raise ValueError("satellite_weight_bear must be between 0.0 and 1.0")
+        super().__init__(strategy, benchmark_symbol, satellite_weight_bull)
+        self._satellite_weight_bull = satellite_weight_bull
+        self._satellite_weight_bear = satellite_weight_bear
+        self._trend_days = trend_days
+
+    @property
+    def requires_benchmark_prices(self) -> bool:
+        return True
+
+    def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
+        benchmark_series = prices.get(self.benchmark_symbol)
+        if benchmark_series is not None:
+            bm = benchmark_series.dropna()
+            if len(bm) >= self._trend_days:
+                ma = float(bm.tail(self._trend_days).mean())
+                current_price = float(bm.iloc[-1])
+                is_bull = current_price > ma
+            else:
+                is_bull = True  # not enough history; default to bull
+        else:
+            is_bull = True
+
+        self.satellite_weight = (
+            self._satellite_weight_bull if is_bull else self._satellite_weight_bear
+        )
+        regime_label = "bull" if is_bull else "bear"
+        result = super().decide(prices, as_of)
+        return TradeDecision(
+            as_of=result.as_of,
+            target_weights=result.target_weights,
+            reason=f"{result.reason}:regime={regime_label}:sat={self.satellite_weight:.0%}",
+        )

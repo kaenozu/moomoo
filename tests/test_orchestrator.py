@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 import pytest
 
-from moomoo import TrdEnv
+from moomoo import TrdEnv, TrdSide
 
 from moomoo_bot import orchestrator
 from moomoo_bot.config import Settings
@@ -286,6 +286,138 @@ def test_run_one_shot_trade_forwards_explicit_position_cap(monkeypatch) -> None:
 
     assert captured["max_position_weight"] == 0.35
     assert captured["fractional_share_precision"] == settings.fractional_share_precision
+
+
+
+def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+        state_db_path=tmp_path / "paper-state.db",
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(
+        position_frame=pd.DataFrame(
+            {
+                "code": ["US.AVGO"],
+                "qty": [-4010.0],
+                "position_side": ["SHORT"],
+            }
+        )
+    )
+    state_store = FakeStateStore()
+
+    result = orchestrator.run_paper_repair(
+        settings=settings,
+        benchmark_symbol="US.VT",
+        quote_client=quote_client,
+        trade_client=trade_client,
+        state_store=state_store,
+        clear_local_state=False,
+    )
+
+    assert result is True
+    assert trade_client.submit_order_calls == 1
+    assert trade_client.submitted_instructions[0].side == TrdSide.BUY
+    assert trade_client.submitted_instructions[0].symbol == "US.AVGO"
+    assert trade_client.submitted_instructions[0].quantity == 4010.0
+    assert state_store.saved_states == []
+
+
+def test_run_one_shot_trade_routes_zero_buying_power_to_repair(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(buying_power=0.0)
+    strategy = FakeStrategy()
+    captured: dict[str, object] = {}
+
+    def fake_run_paper_repair(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(orchestrator, "run_paper_repair", fake_run_paper_repair)
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        trade_client=trade_client,
+        strategy=strategy,
+        state_store=FakeStateStore(),
+    )
+
+    assert captured["settings"] == settings
+    assert captured["benchmark_symbol"] == "US.VT"
+    assert captured["clear_local_state"] is True
+
+
+def test_run_one_shot_trade_caps_paper_capital_to_buying_power(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="JPY",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(account_value=666.67, buying_power=200.0)
+    strategy = FakeStrategy()
+    captured: dict[str, float] = {}
+
+    def fake_build_paper_plan(
+        prices,
+        decision,
+        capital,
+        minimum_order_value=5.0,
+        max_position_weight=1.0,
+        fractional_share_precision=1000.0,
+    ):
+        captured["capital"] = capital
+        return PaperPlan(
+            as_of=decision.as_of,
+            capital=capital,
+            reason=decision.reason,
+            allocations=[],
+            cash_remaining=capital,
+        )
+
+    monkeypatch.setattr(orchestrator, "build_paper_plan", fake_build_paper_plan)
+    monkeypatch.setattr(orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator, "render_risk_orders", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator, "_submit_orders_with_duplicate_guard", lambda *args, **kwargs: None)
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=100_000.0,
+        fx_jpy_per_usd=150.0,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        trade_client=trade_client,
+        strategy=strategy,
+        state_store=FakeStateStore(),
+    )
+
+    assert captured["capital"] == 200.0
+
 
 
 def test_run_one_shot_trade_halves_position_cap_at_drawdown_tier_one(monkeypatch) -> None:
@@ -902,6 +1034,8 @@ class FakeTradeClient:
     get_order_frame_calls: int = 0
     last_instruction_price: float | None = None
     account_value: float = 100_000.0
+    buying_power: float | None = None
+    submitted_instructions: list[object] = field(default_factory=list)
     order_frame: pd.DataFrame = field(
         default_factory=lambda: pd.DataFrame(
             {"order_id": [], "order_status": [], "code": [], "trd_side": [], "qty": [], "price": [], "filled_quantity": [], "remark": []}
@@ -921,6 +1055,8 @@ class FakeTradeClient:
 
     def get_account_value(self):
         return self.account_value
+    def get_buying_power(self):
+        return self.buying_power if self.buying_power is not None else self.account_value
 
     def get_matching_active_order(self, instruction, refresh_cache=True):
         return None
@@ -929,6 +1065,7 @@ class FakeTradeClient:
         self.submit_order_calls += 1
         self.last_instruction_price = instruction.price
         self.submitted_reasons.append(instruction.reason)
+        self.submitted_instructions.append(instruction)
         return pd.DataFrame({"order_id": [self.submit_order_calls], "order_status": ["FILLED"]})
 
     def close(self) -> None:
@@ -1038,12 +1175,15 @@ class FakeStateStore:
             )
             break
 
-    def get_equity_at_month_start(self, market_date: str) -> EquitySnapshot | None:
-        return None
-
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         self.cleanup_calls.append(keep_days)
         return 0
+
+    def get_equity_at_month_start(self, market_date: str):
+        return None
+
+    def get_recent_realizations(self, n: int):
+        return []
 
     def close(self) -> None:
         return None

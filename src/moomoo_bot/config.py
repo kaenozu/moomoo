@@ -71,15 +71,20 @@ class Settings(BaseSettings):
     relative_strength_lookback_days: int = Field(default=0, ge=0)
     max_drawdown_reset_pct: float = Field(default=0.05, ge=0.0, le=1.0)
     daily_loss_limit_pct: float = Field(default=0.05, ge=0.0, le=1.0)
-    monthly_loss_limit_pct: float = Field(default=0.10, ge=0.0, le=1.0)
-    ev_lookback_trades: int = Field(default=0, ge=0)
-    ev_halt_threshold: float = Field(default=-0.02, le=0.0)
-    ev_reduce_threshold: float = Field(default=-0.01, le=0.0)
-    health_check_enabled: bool = False
-    health_check_port: int = Field(default=8080, ge=1, le=65535)
     max_daily_orders: int = Field(default=12, ge=1)
+    monthly_loss_limit_pct: float = Field(default=0.15, ge=0.0, le=1.0)
+    ev_lookback_trades: int = Field(default=20, ge=1)
+    ev_halt_threshold: float = 0.0
+    ev_reduce_threshold: float = 0.0
+    max_slippage_bps: float = Field(default=50.0, ge=0.0)
+    autopilot_history_days: int = Field(default=2200, ge=60)
+    autopilot_poll_seconds: int = Field(default=900, ge=60)
+    autopilot_max_consecutive_failures: int = Field(default=5, ge=1)
+    autopilot_minimum_order_value: float = Field(default=5.0, ge=0.0)
     equity_retention_days: int = Field(default=365, ge=1)
     webhook_url: HttpUrl | None = None
+    health_check_enabled: bool = False
+    health_check_port: int = Field(default=8080, ge=1, le=65535)
     history_retries: int = Field(default=3, ge=0)
     history_retry_delay_seconds: float = Field(default=0.5, gt=0.0)
     quote_retries: int = Field(default=3, ge=0)

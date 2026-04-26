@@ -16,13 +16,14 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-set "MOOMOO_BOT_EXECUTION_MODE=paper"
+set "MOOMOO_BOT_EXECUTION_MODE=live"
+set "MOOMOO_BOT_ALLOW_LIVE_TRADING=true"
 
-echo Starting PAPER one-shot trade with production-matched behavior...
+echo Starting LIVE one-shot trade with production behavior...
 
 if "%FX_JPY_PER_USD%"=="" (
-    "%PYTHON%" -m moomoo_bot.cli paper-trade --capital %CAPITAL% --history-days %HISTORY_DAYS%
+    "%PYTHON%" -m moomoo_bot.cli live-trade --capital %CAPITAL% --history-days %HISTORY_DAYS% --confirm-live-trading
 ) else (
-    "%PYTHON%" -m moomoo_bot.cli paper-trade --capital %CAPITAL% --history-days %HISTORY_DAYS% --fx-jpy-per-usd %FX_JPY_PER_USD%
+    "%PYTHON%" -m moomoo_bot.cli live-trade --capital %CAPITAL% --history-days %HISTORY_DAYS% --fx-jpy-per-usd %FX_JPY_PER_USD% --confirm-live-trading
 )
 exit /b %errorlevel%
