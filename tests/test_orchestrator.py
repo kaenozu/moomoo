@@ -1038,6 +1038,9 @@ class FakeStateStore:
             )
             break
 
+    def get_equity_at_month_start(self, market_date: str) -> EquitySnapshot | None:
+        return None
+
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         self.cleanup_calls.append(keep_days)
         return 0

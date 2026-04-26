@@ -381,7 +381,7 @@ def run_walk_forward_backtest(
             break
 
         train_prices = prices.iloc[start_pos:train_end_pos]
-        train_benchmark = benchmark.iloc[start_pos:train_end_pos]
+        benchmark.iloc[start_pos:train_end_pos]
         test_prices = prices.iloc[train_end_pos - 1 : test_end_pos]
         test_benchmark = benchmark.iloc[train_end_pos - 1 : test_end_pos]
 

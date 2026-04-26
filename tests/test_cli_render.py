@@ -2,7 +2,7 @@
 
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 from moomoo import TrdSide
 from moomoo_bot.cli_render import (
     format_percent,
@@ -17,7 +17,6 @@ from moomoo_bot.cli_render import (
     render_paper_trade_plan,
     render_risk_orders,
     render_order_response,
-    console,
 )
 from moomoo_bot.backtest import BacktestResult
 from moomoo_bot.paper import PaperAllocation, PaperOrderInstruction, PaperPlan
@@ -161,7 +160,7 @@ class TestRenderExecutionReport:
     def test_render_risk_orders_empty(self, mock_console, mock_render_risk):
         from moomoo_bot.paper import PaperPlan
 
-        plan = PaperPlan(
+        PaperPlan(
             as_of=pd.Timestamp("2023-01-01"),
             capital=10000.0,
             reason="test",

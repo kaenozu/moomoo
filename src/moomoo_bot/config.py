@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     relative_strength_lookback_days: int = Field(default=0, ge=0)
     max_drawdown_reset_pct: float = Field(default=0.05, ge=0.0, le=1.0)
     daily_loss_limit_pct: float = Field(default=0.05, ge=0.0, le=1.0)
+    monthly_loss_limit_pct: float = Field(default=0.10, ge=0.0, le=1.0)
+    ev_lookback_trades: int = Field(default=0, ge=0)
+    ev_halt_threshold: float = Field(default=-0.02, le=0.0)
+    ev_reduce_threshold: float = Field(default=-0.01, le=0.0)
+    health_check_enabled: bool = False
+    health_check_port: int = Field(default=8080, ge=1, le=65535)
     max_daily_orders: int = Field(default=12, ge=1)
     equity_retention_days: int = Field(default=365, ge=1)
     webhook_url: HttpUrl | None = None

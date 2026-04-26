@@ -108,9 +108,10 @@ class HealthCheckServer:
             logger.warning("Health check server already running")
             return
 
-        handler = lambda *args, **kwargs: HealthRequestHandler(
-            *args, status_getter=self._get_status, **kwargs
-        )
+        def handler(*args, **kwargs):
+            return HealthRequestHandler(
+                    *args, status_getter=self._get_status, **kwargs
+                )
         self.server = HTTPServer(("127.0.0.1", self.port), handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()

@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from time import sleep
 import pandas as pd

@@ -12,7 +12,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _DEFAULT_DB_DIR = Path.home() / ".moomoo_bot"
 _DEFAULT_DB_NAME = "state.db"
@@ -202,12 +202,6 @@ class StateStore:
                 self._conn.execute("PRAGMA wal_autocheckpoint=1000")
                 self._conn.execute("PRAGMA foreign_keys=ON")
             return self._conn
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
     def close(self) -> None:
         with self._lock:
