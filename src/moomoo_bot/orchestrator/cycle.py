@@ -152,7 +152,7 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
                 if not order_id and pending_order.order_id is not None:
                     order_id = str(pending_order.order_id).strip()
                 if not order_id:
-                    break
+                    continue
 
                 filled_quantity = row_float(
                     order_row,
