@@ -6,8 +6,10 @@ Related: broker/__init__.py, paper.py.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from math import isclose
+from time import sleep
 
 import pandas as pd
 from moomoo import (
@@ -23,6 +25,10 @@ from moomoo_bot.exceptions import BrokerConnectionError, DataError, OrderRejecte
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.row_utils import position_quantities_from_frame
 
+logger = logging.getLogger(__name__)
+
+_START_MAX_RETRIES = 3
+_START_RETRY_DELAY_SECONDS = 2.0
 
 _ACTIVE_ORDER_STATUS_NAMES = frozenset({
     "SUBMITTED",
@@ -47,7 +53,22 @@ class MoomooPaperTradeClient:
             self.trade_context = OpenSecTradeContext(
                 filter_trdmarket=TrdMarket.US, host=self.host, port=self.port
             )
-        self.trade_context.start()
+        last_exc: Exception | None = None
+        for attempt in range(1, _START_MAX_RETRIES + 1):
+            try:
+                self.trade_context.start()
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _START_MAX_RETRIES:
+                    logger.warning(
+                        "trade_context.start() failed (attempt %d/%d): %s; retrying in %.1fs",
+                        attempt, _START_MAX_RETRIES, exc, _START_RETRY_DELAY_SECONDS,
+                    )
+                    sleep(_START_RETRY_DELAY_SECONDS)
+        raise BrokerConnectionError(
+            f"Failed to start trade context after {_START_MAX_RETRIES} attempts: {last_exc}"
+        ) from last_exc
 
     def close(self) -> None:
         if self.trade_context is not None:

@@ -48,6 +48,52 @@ def test_auto_run_delegates_to_orchestrator(monkeypatch) -> None:
     assert calls[0]["settings"] == settings
     assert calls[0]["symbols"] == ["US.AAPL", "US.MSFT"]
     assert calls[0]["benchmark_symbol"] == "US.VT"
+    assert calls[0]["max_position_weight"] == settings.live_max_position_weight
+
+
+def test_autopilot_delegates_to_orchestrator_with_env_defaults(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL,US.MSFT",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        initial_capital=120000.0,
+        fx_jpy_per_usd=150.0,
+        autopilot_history_days=2000,
+        autopilot_poll_seconds=600,
+        autopilot_max_consecutive_failures=7,
+        autopilot_minimum_order_value=9.0,
+    )
+    calls: list[dict] = []
+
+    def fake_run_auto_monitor(**kwargs):
+        calls.append(kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(orchestrator, "run_auto_monitor", fake_run_auto_monitor)
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.autopilot()
+
+    assert len(calls) == 1
+    assert calls[0]["settings"] == settings
+    assert calls[0]["symbols"] == ["US.AAPL", "US.MSFT"]
+    assert calls[0]["benchmark_symbol"] == "US.VT"
+    assert calls[0]["history_days"] == 2000
+    assert calls[0]["capital"] == 120000.0
+    assert calls[0]["fx_jpy_per_usd"] == 150.0
+    assert calls[0]["minimum_order_value"] == 9.0
+    assert calls[0]["poll_seconds"] == 600
+    assert calls[0]["max_consecutive_failures"] == 7
+    assert calls[0]["max_position_weight"] == settings.live_max_position_weight
+
+
+def test_autopilot_requires_paper_mode(monkeypatch) -> None:
+    settings = Settings(symbols="US.AAPL", benchmark_symbol="US.VT", execution_mode="live")
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+
+    with pytest.raises(typer.BadParameter, match="requires MOOMOO_BOT_EXECUTION_MODE=paper"):
+        cli.autopilot()
 
 
 def test_live_trade_requires_explicit_confirmation(monkeypatch) -> None:
@@ -119,6 +165,29 @@ def test_paper_trade_delegates_to_orchestrator(monkeypatch) -> None:
 
     assert len(calls) == 1
     assert calls[0]["trade_env"] == TrdEnv.SIMULATE
+    assert calls[0]["max_position_weight"] == settings.live_max_position_weight
+
+
+def test_paper_repair_delegates_to_orchestrator(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+    )
+    calls: list[dict] = []
+
+    def fake_run_paper_repair(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(orchestrator, "run_paper_repair", fake_run_paper_repair)
+
+    cli.paper_repair(benchmark_symbol=None, clear_local_state=True)
+
+    assert len(calls) == 1
+    assert calls[0]["settings"] == settings
+    assert calls[0]["benchmark_symbol"] == "US.VT"
+    assert calls[0]["clear_local_state"] is True
 
 
 def test_paper_run_delegates_to_orchestrator_with_submit_orders_false(monkeypatch) -> None:
@@ -149,6 +218,7 @@ def test_paper_run_delegates_to_orchestrator_with_submit_orders_false(monkeypatc
     assert len(calls) == 1
     assert calls[0]["trade_env"] == TrdEnv.SIMULATE
     assert calls[0]["submit_orders"] is False
+    assert calls[0]["max_position_weight"] == settings.live_max_position_weight
 
 
 def test_build_monthly_strategy_uses_core_satellite_wrapper() -> None:

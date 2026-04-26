@@ -119,6 +119,118 @@ def default_satellite_weights() -> list[float]:
     return [round(step / 20, 2) for step in range(0, 21)]
 
 
+def _validate_search_inputs(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    split_ratio: float,
+) -> None:
+    if prices.empty:
+        raise ValueError("prices must not be empty")
+    if benchmark.empty:
+        raise ValueError("benchmark must not be empty")
+    if not 0.5 <= split_ratio < 1.0:
+        raise ValueError("split_ratio must be between 0.5 and 1.0")
+
+
+@dataclass(frozen=True)
+class _SearchContext:
+    train_end_date: pd.Timestamp
+    test_start_date: pd.Timestamp
+    walk_forward_windows: list[tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]]
+    regime_segments: tuple[MarketRegimeSegment, ...]
+
+
+def _build_search_context(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    split_ratio: float,
+    walk_forward_train_size: int | None,
+    walk_forward_test_size: int | None,
+    walk_forward_step_size: int | None,
+    regime_lookback_days: int,
+    regime_min_segment_days: int,
+) -> _SearchContext:
+    index_length = len(prices.index)
+    train_end_date, test_start_date = _split_period_boundaries(
+        prices.index, split_ratio
+    )
+    walk_forward_windows = _rolling_walk_forward_boundaries(
+        prices.index,
+        train_size=_resolved_walk_forward_train_size(
+            index_length, walk_forward_train_size, walk_forward_test_size
+        ),
+        test_size=_resolved_walk_forward_test_size(
+            index_length, walk_forward_test_size
+        ),
+        step_size=_resolved_walk_forward_step_size(
+            index_length, walk_forward_step_size, walk_forward_test_size
+        ),
+    )
+    regime_segments = _derive_market_regime_segments(
+        benchmark,
+        lookback_days=regime_lookback_days,
+        min_segment_days=regime_min_segment_days,
+    )
+    return _SearchContext(
+        train_end_date=train_end_date,
+        test_start_date=test_start_date,
+        walk_forward_windows=walk_forward_windows,
+        regime_segments=regime_segments,
+    )
+
+
+def _evaluate_result_metrics(
+    result: BacktestResult,
+    prices: pd.DataFrame,
+    ctx: _SearchContext,
+) -> dict:
+    train_metrics = _summarize_period(
+        result.equity_curve, result.benchmark_curve,
+        prices.index[0], ctx.train_end_date,
+    )
+    test_metrics = _summarize_period(
+        result.equity_curve, result.benchmark_curve,
+        ctx.test_start_date, prices.index[-1],
+    )
+    walk_forward_metrics = _summarize_walk_forward_windows(
+        result.equity_curve, result.benchmark_curve,
+        ctx.walk_forward_windows,
+    )
+    regime_scores = _summarize_regime_performance(
+        result.equity_curve, result.benchmark_curve,
+        ctx.regime_segments,
+    )
+    return {
+        "train_metrics": train_metrics,
+        "test_metrics": test_metrics,
+        "walk_forward_metrics": walk_forward_metrics,
+        "regime_scores": regime_scores,
+    }
+
+
+def _build_search_result_fields(metrics: dict) -> dict:
+    train_m = metrics["train_metrics"]
+    test_m = metrics["test_metrics"]
+    wf_m = metrics["walk_forward_metrics"]
+    regime_scores = metrics["regime_scores"]
+    return {
+        "train_excess": train_m["total_return"] - train_m["benchmark_return"],
+        "test_excess": test_m["total_return"] - test_m["benchmark_return"],
+        "train_cagr": train_m["cagr"],
+        "test_cagr": test_m["cagr"],
+        "test_sharpe": test_m["sharpe"],
+        "train_drawdown": train_m["max_drawdown"],
+        "test_drawdown": test_m["max_drawdown"],
+        "walk_forward_mean_excess": wf_m["mean_excess"],
+        "walk_forward_worst_excess": wf_m["worst_excess"],
+        "walk_forward_mean_cagr": wf_m["mean_cagr"],
+        "walk_forward_worst_drawdown": wf_m["worst_drawdown"],
+        "walk_forward_window_count": wf_m["window_count"],
+        "regime_worst_excess": _worst_regime_excess(regime_scores),
+        "regime_scores": regime_scores,
+    }
+
+
 def search_momentum_candidates(
     prices: pd.DataFrame,
     benchmark: pd.Series,
@@ -132,12 +244,7 @@ def search_momentum_candidates(
     regime_lookback_days: int = 63,
     regime_min_segment_days: int = 21,
 ) -> list[MomentumSearchResult]:
-    if prices.empty:
-        raise ValueError("prices must not be empty")
-    if benchmark.empty:
-        raise ValueError("benchmark must not be empty")
-    if not 0.5 <= split_ratio < 1.0:
-        raise ValueError("split_ratio must be between 0.5 and 1.0")
+    _validate_search_inputs(prices, benchmark, split_ratio)
 
     candidate_configs = (
         list(configs) if configs is not None else default_momentum_search_configs()
@@ -145,80 +252,24 @@ def search_momentum_candidates(
     if not candidate_configs:
         raise ValueError("configs must not be empty")
 
-    train_end_date, test_start_date = _split_period_boundaries(
-        prices.index, split_ratio
-    )
-    walk_forward_windows = _rolling_walk_forward_boundaries(
-        prices.index,
-        train_size=_resolved_walk_forward_train_size(
-            len(prices.index), walk_forward_train_size, walk_forward_test_size
-        ),
-        test_size=_resolved_walk_forward_test_size(
-            len(prices.index), walk_forward_test_size
-        ),
-        step_size=_resolved_walk_forward_step_size(
-            len(prices.index), walk_forward_step_size, walk_forward_test_size
-        ),
-    )
-    regime_segments = _derive_market_regime_segments(
-        benchmark,
-        lookback_days=regime_lookback_days,
-        min_segment_days=regime_min_segment_days,
+    ctx = _build_search_context(
+        prices, benchmark, split_ratio,
+        walk_forward_train_size, walk_forward_test_size, walk_forward_step_size,
+        regime_lookback_days, regime_min_segment_days,
     )
 
     ranked_results: list[MomentumSearchResult] = []
     for config in candidate_configs:
         full_result = run_backtest(
-            prices,
-            benchmark,
+            prices, benchmark,
             MonthlyMomentumRotationStrategy(config),
             transaction_cost_per_trade=transaction_cost_per_trade,
             transaction_cost_bps=transaction_cost_bps,
         )
-        train_metrics = _summarize_period(
-            full_result.equity_curve,
-            full_result.benchmark_curve,
-            prices.index[0],
-            train_end_date,
-        )
-        test_metrics = _summarize_period(
-            full_result.equity_curve,
-            full_result.benchmark_curve,
-            test_start_date,
-            prices.index[-1],
-        )
-        walk_forward_metrics = _summarize_walk_forward_windows(
-            full_result.equity_curve,
-            full_result.benchmark_curve,
-            walk_forward_windows,
-        )
-        regime_scores = _summarize_regime_performance(
-            full_result.equity_curve,
-            full_result.benchmark_curve,
-            regime_segments,
-        )
-
+        metrics = _evaluate_result_metrics(full_result, prices, ctx)
+        fields = _build_search_result_fields(metrics)
         ranked_results.append(
-            MomentumSearchResult(
-                config=config,
-                full_result=full_result,
-                train_excess=train_metrics["total_return"]
-                - train_metrics["benchmark_return"],
-                test_excess=test_metrics["total_return"]
-                - test_metrics["benchmark_return"],
-                train_cagr=train_metrics["cagr"],
-                test_cagr=test_metrics["cagr"],
-                test_sharpe=test_metrics["sharpe"],
-                train_drawdown=train_metrics["max_drawdown"],
-                test_drawdown=test_metrics["max_drawdown"],
-                walk_forward_mean_excess=walk_forward_metrics["mean_excess"],
-                walk_forward_worst_excess=walk_forward_metrics["worst_excess"],
-                walk_forward_mean_cagr=walk_forward_metrics["mean_cagr"],
-                walk_forward_worst_drawdown=walk_forward_metrics["worst_drawdown"],
-                walk_forward_window_count=walk_forward_metrics["window_count"],
-                regime_worst_excess=_worst_regime_excess(regime_scores),
-                regime_scores=regime_scores,
-            )
+            MomentumSearchResult(config=config, full_result=full_result, **fields)
         )
 
     return sorted(ranked_results, key=_ranking_key, reverse=True)
@@ -238,12 +289,7 @@ def search_satellite_candidates(
     regime_lookback_days: int = 63,
     regime_min_segment_days: int = 21,
 ) -> list[SatelliteSearchResult]:
-    if prices.empty:
-        raise ValueError("prices must not be empty")
-    if benchmark.empty:
-        raise ValueError("benchmark must not be empty")
-    if not 0.5 <= split_ratio < 1.0:
-        raise ValueError("split_ratio must be between 0.5 and 1.0")
+    _validate_search_inputs(prices, benchmark, split_ratio)
 
     candidate_configs = (
         list(configs) if configs is not None else default_momentum_search_configs()
@@ -259,82 +305,30 @@ def search_satellite_candidates(
     if not candidate_weights:
         raise ValueError("satellite_weights must not be empty")
 
-    train_end_date, test_start_date = _split_period_boundaries(
-        prices.index, split_ratio
-    )
-    walk_forward_windows = _rolling_walk_forward_boundaries(
-        prices.index,
-        train_size=_resolved_walk_forward_train_size(
-            len(prices.index), walk_forward_train_size, walk_forward_test_size
-        ),
-        test_size=_resolved_walk_forward_test_size(
-            len(prices.index), walk_forward_test_size
-        ),
-        step_size=_resolved_walk_forward_step_size(
-            len(prices.index), walk_forward_step_size, walk_forward_test_size
-        ),
-    )
-    regime_segments = _derive_market_regime_segments(
-        benchmark,
-        lookback_days=regime_lookback_days,
-        min_segment_days=regime_min_segment_days,
+    ctx = _build_search_context(
+        prices, benchmark, split_ratio,
+        walk_forward_train_size, walk_forward_test_size, walk_forward_step_size,
+        regime_lookback_days, regime_min_segment_days,
     )
 
     ranked_results: list[SatelliteSearchResult] = []
     for config in candidate_configs:
         strategy_result = run_backtest(
-            prices,
-            benchmark,
+            prices, benchmark,
             MonthlyMomentumRotationStrategy(config),
             transaction_cost_per_trade=transaction_cost_per_trade,
             transaction_cost_bps=transaction_cost_bps,
         )
         for satellite_weight in candidate_weights:
             blended_result = _blend_with_benchmark(strategy_result, satellite_weight)
-            train_metrics = _summarize_period(
-                blended_result.equity_curve,
-                blended_result.benchmark_curve,
-                prices.index[0],
-                train_end_date,
-            )
-            test_metrics = _summarize_period(
-                blended_result.equity_curve,
-                blended_result.benchmark_curve,
-                test_start_date,
-                prices.index[-1],
-            )
-            walk_forward_metrics = _summarize_walk_forward_windows(
-                blended_result.equity_curve,
-                blended_result.benchmark_curve,
-                walk_forward_windows,
-            )
-            regime_scores = _summarize_regime_performance(
-                blended_result.equity_curve,
-                blended_result.benchmark_curve,
-                regime_segments,
-            )
-
+            metrics = _evaluate_result_metrics(blended_result, prices, ctx)
+            fields = _build_search_result_fields(metrics)
             ranked_results.append(
                 SatelliteSearchResult(
                     config=config,
                     satellite_weight=satellite_weight,
                     full_result=blended_result,
-                    train_excess=train_metrics["total_return"]
-                    - train_metrics["benchmark_return"],
-                    test_excess=test_metrics["total_return"]
-                    - test_metrics["benchmark_return"],
-                    train_cagr=train_metrics["cagr"],
-                    test_cagr=test_metrics["cagr"],
-                    test_sharpe=test_metrics["sharpe"],
-                    train_drawdown=train_metrics["max_drawdown"],
-                    test_drawdown=test_metrics["max_drawdown"],
-                    walk_forward_mean_excess=walk_forward_metrics["mean_excess"],
-                    walk_forward_worst_excess=walk_forward_metrics["worst_excess"],
-                    walk_forward_mean_cagr=walk_forward_metrics["mean_cagr"],
-                    walk_forward_worst_drawdown=walk_forward_metrics["worst_drawdown"],
-                    walk_forward_window_count=walk_forward_metrics["window_count"],
-                    regime_worst_excess=_worst_regime_excess(regime_scores),
-                    regime_scores=regime_scores,
+                    **fields,
                 )
             )
 
