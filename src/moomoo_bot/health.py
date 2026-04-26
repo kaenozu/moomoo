@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
-from threading import Thread
+from threading import Lock, Thread
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -66,6 +66,7 @@ class HealthCheckServer:
         self.port = port
         self.server: HTTPServer | None = None
         self.thread: Thread | None = None
+        self._lock = Lock()
         self._status = HealthStatus(
             is_healthy=True, timestamp=datetime.now(timezone.utc).isoformat()
         )
@@ -80,24 +81,26 @@ class HealthCheckServer:
         trade_count: int = 0,
         equity_curve_points: int = 0,
     ):
-        self._status = HealthStatus(
-            is_healthy=is_healthy,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            account_value=account_value,
-            risk_halted=risk_halted,
-            last_error=last_error,
-            uptime_seconds=(
-                datetime.now(timezone.utc) - self._start_time
-            ).total_seconds(),
-            trade_count=trade_count,
-            equity_curve_points=equity_curve_points,
-        )
+        with self._lock:
+            self._status = HealthStatus(
+                is_healthy=is_healthy,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                account_value=account_value,
+                risk_halted=risk_halted,
+                last_error=last_error,
+                uptime_seconds=(
+                    datetime.now(timezone.utc) - self._start_time
+                ).total_seconds(),
+                trade_count=trade_count,
+                equity_curve_points=equity_curve_points,
+            )
 
     def _get_status(self) -> HealthStatus:
-        self._status.uptime_seconds = (
-            datetime.now(timezone.utc) - self._start_time
-        ).total_seconds()
-        return self._status
+        with self._lock:
+            self._status.uptime_seconds = (
+                datetime.now(timezone.utc) - self._start_time
+            ).total_seconds()
+            return self._status
 
     def start(self):
         """Start the health check server in a background thread."""

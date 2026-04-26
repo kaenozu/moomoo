@@ -71,6 +71,17 @@ def test_build_liquidation_orders_can_route_closed_market_sells_to_eth() -> None
     assert orders[0].fill_outside_rth is True
 
 
+def test_build_liquidation_orders_respect_fractional_precision() -> None:
+    orders = build_liquidation_orders(
+        {"US.AAPL": 0.36},
+        {"US.AAPL": 90.0},
+        "risk:halt",
+        fractional_share_precision=10.0,
+    )
+
+    assert orders[0].quantity == 0.3
+
+
 def test_build_stop_loss_take_profit_orders_can_route_closed_market_exits_to_eth() -> None:
     position_rows = pd.DataFrame(
         {
@@ -92,3 +103,24 @@ def test_build_stop_loss_take_profit_orders_can_route_closed_market_exits_to_eth
 
     assert orders[0].session == Session.ETH
     assert orders[0].fill_outside_rth is True
+
+
+def test_build_stop_loss_take_profit_orders_respect_fractional_precision() -> None:
+    position_rows = pd.DataFrame(
+        {
+            "code": ["US.AAPL"],
+            "qty": [0.36],
+            "cost_price": [100.0],
+        }
+    )
+    latest_prices = {"US.AAPL": 89.0}
+
+    orders = build_stop_loss_take_profit_orders(
+        position_rows,
+        latest_prices,
+        stop_loss_pct=0.10,
+        take_profit_pct=0.20,
+        fractional_share_precision=10.0,
+    )
+
+    assert orders[0].quantity == 0.3

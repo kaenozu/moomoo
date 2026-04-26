@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 from moomoo_bot.backtest import run_backtest
 from moomoo_bot.broker import MoomooOpenDClient
-from moomoo_bot.cli_helpers import build_monthly_strategy
+from moomoo_bot.cli_helpers import build_monthly_strategy, requires_benchmark_prices
 from moomoo_bot.config import get_settings
 
 
@@ -45,10 +45,13 @@ def main() -> None:
     settings = get_settings()
     client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
     try:
-        price_frame, benchmark_series = client.fetch_price_panel(
-            settings.symbol_list, settings.benchmark_symbol, history_days=2200
-        )
         strategy = build_monthly_strategy(settings)
+        price_frame, benchmark_series = client.fetch_price_panel(
+            settings.symbol_list,
+            settings.benchmark_symbol,
+            history_days=2200,
+            include_benchmark_in_prices=requires_benchmark_prices(strategy),
+        )
         result = run_backtest(price_frame, benchmark_series, strategy)
         
         analysis = analyze_drawdown(result.equity_curve)

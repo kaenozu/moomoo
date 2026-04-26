@@ -160,6 +160,7 @@ class MoomooOpenDClient:
         symbols: Sequence[str],
         benchmark_symbol: str,
         history_days: int = 900,
+        include_benchmark_in_prices: bool = False,
     ) -> tuple[pd.DataFrame, pd.Series]:
         if not symbols:
             raise ValueError("symbols must not be empty")
@@ -185,12 +186,17 @@ class MoomooOpenDClient:
             series.index = pd.to_datetime(series.index)
             series_by_symbol[symbol] = series.sort_index()
 
-        return combine_price_series(series_by_symbol, benchmark_symbol)
+        return combine_price_series(
+            series_by_symbol,
+            benchmark_symbol,
+            include_benchmark_in_prices=include_benchmark_in_prices,
+        )
 
 
 def combine_price_series(
     series_by_symbol: Mapping[str, pd.Series],
     benchmark_symbol: str,
+    include_benchmark_in_prices: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series]:
     if benchmark_symbol not in series_by_symbol:
         raise ValueError(f"benchmark symbol {benchmark_symbol} not found in series map")
@@ -200,8 +206,13 @@ def combine_price_series(
     if price_frame.empty:
         raise ValueError("No overlapping dates across the requested symbols")
 
-    benchmark = price_frame.pop(benchmark_symbol).rename("benchmark")
-    tradable = price_frame.dropna(how="any")
+    benchmark = price_frame[benchmark_symbol].rename("benchmark")
+    tradable = (
+        price_frame.copy()
+        if include_benchmark_in_prices
+        else price_frame.drop(columns=[benchmark_symbol])
+    )
+    tradable = tradable.dropna(how="any")
     if tradable.empty:
         raise ValueError("No tradable rows remain after removing missing values")
     return tradable, benchmark.loc[tradable.index]

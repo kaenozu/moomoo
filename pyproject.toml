@@ -9,7 +9,7 @@ description = "CLI trading bot prototype for Moomoo US paper trading and strateg
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "moomoo-api",
+  "moomoo-api>=1.6.2,<2.0.0",
   "numpy>=1.26,<3.0",
   "pandas>=2.2,<3.0",
   "pydantic>=2.7,<3.0",

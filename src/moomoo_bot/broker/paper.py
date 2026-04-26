@@ -6,13 +6,14 @@ Related: broker/__init__.py, paper.py.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from math import isclose
+from time import sleep
 
 import pandas as pd
 from moomoo import (
     OpenSecTradeContext,
-    OrderStatus,
     OrderType,
     RET_OK,
     Session,
@@ -22,17 +23,22 @@ from moomoo import (
 
 from moomoo_bot.exceptions import BrokerConnectionError, DataError, OrderRejectedError
 from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.row_utils import position_quantities_from_frame
 
+logger = logging.getLogger(__name__)
 
-_ACTIVE_ORDER_STATUSES = {
-    OrderStatus.SUBMITTED,
-    OrderStatus.SUBMITTING,
-    OrderStatus.WAITING_SUBMIT,
-    OrderStatus.CANCELLING_ALL,
-    OrderStatus.CANCELLING_PART,
-    OrderStatus.CANCELLED_PART,
-    OrderStatus.FILLED_PART,
-}
+_START_MAX_RETRIES = 3
+_START_RETRY_DELAY_SECONDS = 2.0
+
+_ACTIVE_ORDER_STATUS_NAMES = frozenset({
+    "SUBMITTED",
+    "SUBMITTING",
+    "WAITING_SUBMIT",
+    "CANCELLING_ALL",
+    "CANCELLING_PART",
+    "CANCELLED_PART",
+    "FILLED_PART",
+})
 
 
 @dataclass
@@ -47,7 +53,22 @@ class MoomooPaperTradeClient:
             self.trade_context = OpenSecTradeContext(
                 filter_trdmarket=TrdMarket.US, host=self.host, port=self.port
             )
-        self.trade_context.start()
+        last_exc: Exception | None = None
+        for attempt in range(1, _START_MAX_RETRIES + 1):
+            try:
+                self.trade_context.start()
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _START_MAX_RETRIES:
+                    logger.warning(
+                        "trade_context.start() failed (attempt %d/%d): %s; retrying in %.1fs",
+                        attempt, _START_MAX_RETRIES, exc, _START_RETRY_DELAY_SECONDS,
+                    )
+                    sleep(_START_RETRY_DELAY_SECONDS)
+        raise BrokerConnectionError(
+            f"Failed to start trade context after {_START_MAX_RETRIES} attempts: {last_exc}"
+        ) from last_exc
 
     def close(self) -> None:
         if self.trade_context is not None:
@@ -66,10 +87,36 @@ class MoomooPaperTradeClient:
 
         row = data.iloc[0]
         for field in ("total_assets", "power", "available_funds"):
-            value = row.get(field)
-            if value is not None and float(value) > 0.0:
-                return float(value)
+            value = _positive_float(row.get(field))
+            if value is not None:
+                return value
         raise DataError("Simulated account did not expose a positive account value")
+
+    def get_buying_power(self) -> float:
+        if self.trade_context is None:
+            raise BrokerConnectionError("trade context is not initialized")
+        ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
+        if ret != RET_OK:
+            mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
+            raise BrokerConnectionError(f"Failed to fetch {mode_name} account info: {data}")
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
+            raise DataError(f"{mode_name} account info did not return rows")
+
+        row = data.iloc[0]
+        for field in (
+            "available_funds",
+            "power",
+            "remaining_dtbp",
+            "usd_net_cash_power",
+            "avl_withdrawal_cash",
+            "cash",
+            "us_cash",
+        ):
+            value = _positive_float(row.get(field))
+            if value is not None:
+                return float(value)
+        return 0.0
 
     def get_position_frame(self) -> pd.DataFrame:
         if self.trade_context is None:
@@ -84,16 +131,7 @@ class MoomooPaperTradeClient:
         return data.copy()
 
     def get_position_quantities(self) -> dict[str, float]:
-        data = self.get_position_frame()
-        positions: dict[str, float] = {}
-        for _, row in data.iterrows():
-            code = str(row.get("code", "")).strip()
-            if not code:
-                continue
-            qty = float(row.get("qty", 0.0) or 0.0)
-            if qty > 0.0:
-                positions[code] = qty
-        return positions
+        return position_quantities_from_frame(self.get_position_frame())
 
     def get_order_frame(self, refresh_cache: bool = True) -> pd.DataFrame:
         if self.trade_context is None:
@@ -163,7 +201,7 @@ class MoomooPaperTradeClient:
 
 def _is_active_order_status(status: object) -> bool:
     normalized_status = str(status).strip().upper()
-    return normalized_status in _ACTIVE_ORDER_STATUSES
+    return normalized_status in _ACTIVE_ORDER_STATUS_NAMES
 
 
 def _normalize_text(value: object) -> str:
@@ -182,6 +220,54 @@ def _normalize_order_bool(value: object) -> bool:
     return normalized in {"TRUE", "1", "YES", "Y"}
 
 
+def _positive_float(value: object) -> float | None:
+    normalized_text = _normalize_text(value).upper()
+    if normalized_text in {"", "N/A", "NONE", "NAN"}:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric <= 0.0:
+        return None
+    return numeric
+
+
+def _quantity_matches(order_qty: object, instruction_qty: float) -> bool:
+    broker_qty = float(order_qty or 0.0)
+    requested_qty = float(instruction_qty or 0.0)
+    if isclose(broker_qty, requested_qty, rel_tol=1e-6, abs_tol=0.001):
+        return True
+
+    # Some paper responses normalize quantity to whole shares in order queries.
+    truncated_requested_qty = float(int(requested_qty))
+    if truncated_requested_qty <= 0.0:
+        return False
+    return isclose(
+        broker_qty,
+        truncated_requested_qty,
+        rel_tol=1e-6,
+        abs_tol=0.001,
+    )
+
+
+def _session_matches(order_row: pd.Series, instruction: PaperOrderInstruction) -> bool:
+    row_session = _normalize_order_session(order_row.get("session"))
+    if not row_session:
+        return True
+    return row_session == _normalize_order_session(instruction.session)
+
+
+def _fill_outside_rth_matches(
+    order_row: pd.Series, instruction: PaperOrderInstruction
+) -> bool:
+    raw_value = order_row.get("fill_outside_rth")
+    normalized_text = _normalize_text(raw_value)
+    if not normalized_text:
+        return True
+    return _normalize_order_bool(raw_value) == bool(instruction.fill_outside_rth)
+
+
 def _order_matches_instruction(
     order_row: pd.Series, instruction: PaperOrderInstruction
 ) -> bool:
@@ -189,22 +275,15 @@ def _order_matches_instruction(
         _normalize_text(order_row.get("code")) == instruction.symbol
         and _normalize_text(order_row.get("trd_side")).upper()
         == str(instruction.side).upper()
-        and isclose(
-            float(order_row.get("qty", 0.0) or 0.0),
-            float(instruction.quantity),
-            rel_tol=1e-6,
-            abs_tol=0.001,
-        )
+        and _quantity_matches(order_row.get("qty", 0.0), float(instruction.quantity))
         and isclose(
             float(order_row.get("price", 0.0) or 0.0),
             float(instruction.price),
             rel_tol=1e-6,
             abs_tol=0.001,
         )
-        and _normalize_order_session(order_row.get("session"))
-        == _normalize_order_session(instruction.session)
-        and _normalize_order_bool(order_row.get("fill_outside_rth"))
-        == bool(instruction.fill_outside_rth)
+        and _session_matches(order_row, instruction)
+        and _fill_outside_rth_matches(order_row, instruction)
         and _normalize_text(order_row.get("remark"))
         == _normalize_text(instruction.reason)
     )

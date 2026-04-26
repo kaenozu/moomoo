@@ -35,11 +35,12 @@ Planned next increment:
 - Live order routing behind an explicit live-mode flag and confirmation gate after paper-trade is exercised
 
 ## Research Outcome
-- The strongest candidate found so far is a monthly long-only momentum rotation using liquid US large-cap stocks.
-- Best configuration discovered: lookback 252 days, trend 252 days, skip 21 days, rebalance every 21 trading days, top 1 holding.
-- When used as a satellite sleeve on VT, the strategy still added value in the 10% to 25% range across 55/45 through 85/15 split checks.
-- Best balanced satellite weight: 23% active / 77% VT.
-- 25% is the raw-excess leader, while 100% active is the highest-return but highest-risk mode.
+- The current cost-aware robustness leader is a monthly long-only momentum rotation using liquid US large-cap stocks.
+- Best configuration in the 2026-04-24 OpenD rerun: lookback 252 days, trend 252 days, skip 0 days, rebalance every 21 trading days, top 2 holdings.
+- The previously cited 252/252/21 top-1 setup no longer survives the newer walk-forward and regime checks; in the latest rerun it fell to rank 21 with negative test excess.
+- The latest VT satellite rerun favors roughly 43% active / 57% VT in the refined sweep, with 45% active / 55% VT winning the coarse 5% grid.
+- The older 23% to 25% sleeve still adds value, but it is no longer the best-balanced setting under the current ranking.
+- Pure active still maximizes full-sample excess in some configurations, but it gives up robustness and is not the default recommendation.
 
 ## Project Structure
 - `src/moomoo_bot/` - Application package

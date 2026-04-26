@@ -6,6 +6,7 @@ Related: strategy/base.py, strategy/momentum.py.
 
 from .base import Strategy, TradeDecision
 from .momentum import (
+    CoreSatelliteStrategy,
     MomentumRotationConfig,
     MomentumRotationStrategy,
     MonthlyMomentumRotationConfig,
@@ -13,6 +14,7 @@ from .momentum import (
 )
 
 __all__ = [
+    "CoreSatelliteStrategy",
     "MomentumRotationConfig",
     "MomentumRotationStrategy",
     "MonthlyMomentumRotationConfig",
