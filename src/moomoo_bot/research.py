@@ -481,7 +481,9 @@ def _derive_market_regime_segments(
     for current_date in benchmark.index[lookback_days:]:
         current_drawdown = float(drawdown.loc[current_date])
         current_return = float(rolling_return.loc[current_date])
-        labels.append((current_date, _classify_market_regime(current_return, current_drawdown)))
+        labels.append(
+            (current_date, _classify_market_regime(current_return, current_drawdown))
+        )
 
     if not labels:
         return ()

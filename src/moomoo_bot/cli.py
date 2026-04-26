@@ -108,9 +108,7 @@ def status() -> None:
     table.add_row(
         "Transaction cost per trade", f"{settings.transaction_cost_per_trade:.2f}"
     )
-    table.add_row(
-        "Transaction cost bps", f"{settings.transaction_cost_bps:.2f}"
-    )
+    table.add_row("Transaction cost bps", f"{settings.transaction_cost_bps:.2f}")
     table.add_row(
         "Live max position weight", format_percent(settings.live_max_position_weight)
     )

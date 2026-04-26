@@ -367,9 +367,7 @@ def run_walk_forward_backtest(
     total_days = len(dates)
     min_required = train_period_days + test_period_days
     if total_days < min_required:
-        raise ValueError(
-            f"Not enough data: need {min_required} rows, got {total_days}"
-        )
+        raise ValueError(f"Not enough data: need {min_required} rows, got {total_days}")
 
     folds: list[WalkForwardFold] = []
     fold_index = 0

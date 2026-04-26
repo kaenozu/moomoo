@@ -24,15 +24,17 @@ from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.row_utils import position_quantities_from_frame
 
 
-_ACTIVE_ORDER_STATUS_NAMES = frozenset({
-    "SUBMITTED",
-    "SUBMITTING",
-    "WAITING_SUBMIT",
-    "CANCELLING_ALL",
-    "CANCELLING_PART",
-    "CANCELLED_PART",
-    "FILLED_PART",
-})
+_ACTIVE_ORDER_STATUS_NAMES = frozenset(
+    {
+        "SUBMITTED",
+        "SUBMITTING",
+        "WAITING_SUBMIT",
+        "CANCELLING_ALL",
+        "CANCELLING_PART",
+        "CANCELLED_PART",
+        "FILLED_PART",
+    }
+)
 
 
 @dataclass
@@ -59,7 +61,9 @@ class MoomooPaperTradeClient:
         ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise BrokerConnectionError(f"Failed to fetch {mode_name} account info: {data}")
+            raise BrokerConnectionError(
+                f"Failed to fetch {mode_name} account info: {data}"
+            )
         if not isinstance(data, pd.DataFrame) or data.empty:
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
             raise DataError(f"{mode_name} account info did not return rows")
@@ -77,7 +81,9 @@ class MoomooPaperTradeClient:
         ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise BrokerConnectionError(f"Failed to fetch {mode_name} account info: {data}")
+            raise BrokerConnectionError(
+                f"Failed to fetch {mode_name} account info: {data}"
+            )
         if not isinstance(data, pd.DataFrame) or data.empty:
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
             raise DataError(f"{mode_name} account info did not return rows")
@@ -103,7 +109,9 @@ class MoomooPaperTradeClient:
         ret, data = self.trade_context.position_list_query(trd_env=self.trd_env)
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise BrokerConnectionError(f"Failed to fetch {mode_name} positions: {data}")
+            raise BrokerConnectionError(
+                f"Failed to fetch {mode_name} positions: {data}"
+            )
         if not isinstance(data, pd.DataFrame):
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
             raise DataError(f"{mode_name} positions did not return a DataFrame")

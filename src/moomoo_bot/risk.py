@@ -74,9 +74,8 @@ def update_drawdown_state(
     # Recovery logic
     if state.halted:
         # If recovered within reset threshold, unhalt
-        if (
-            max_drawdown_reset_pct > 0.0
-            and account_value >= peak * (1.0 - max_drawdown_reset_pct)
+        if max_drawdown_reset_pct > 0.0 and account_value >= peak * (
+            1.0 - max_drawdown_reset_pct
         ):
             state.halted = False
             state.halted_reason = None
@@ -242,9 +241,7 @@ def build_stop_loss_take_profit_orders(
         if not symbol or symbol not in latest_prices:
             continue
 
-        quantity = row_float(
-            row, "qty", "position_qty", "holding_qty", "can_use_qty"
-        )
+        quantity = row_float(row, "qty", "position_qty", "holding_qty", "can_use_qty")
         if quantity is None or quantity <= 0.0:
             continue
         quantity = round_quantity_toward_zero(
@@ -288,4 +285,3 @@ def build_stop_loss_take_profit_orders(
             )
 
     return sorted(orders, key=lambda instruction: instruction.symbol)
-

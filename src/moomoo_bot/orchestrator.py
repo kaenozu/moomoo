@@ -214,7 +214,9 @@ def _clear_state_files(state_store: StateStore) -> None:
     state_store.close()
     db_path = state_store.db_path
     for suffix in ("", "-wal", "-shm"):
-        candidate = db_path if suffix == "" else db_path.with_name(db_path.name + suffix)
+        candidate = (
+            db_path if suffix == "" else db_path.with_name(db_path.name + suffix)
+        )
         if candidate.exists():
             candidate.unlink()
 
@@ -671,8 +673,12 @@ def _execute_trading_cycle(
         persistent_risk_state = state_store.load_risk_state()
         risk_state = _restore_risk_state(persistent_risk_state)
         if buying_power_usd is not None and buying_power_usd <= 0.0:
-            logger.warning("Paper account has no positive buying power; attempting repair.")
-            console.print("Paper account has no positive buying power; attempting repair.")
+            logger.warning(
+                "Paper account has no positive buying power; attempting repair."
+            )
+            console.print(
+                "Paper account has no positive buying power; attempting repair."
+            )
             return run_paper_repair(
                 settings=settings,
                 benchmark_symbol=benchmark_label,
@@ -804,7 +810,9 @@ def _execute_trading_cycle(
             daily_ref = _daily_loss_reference(state_store, market_date) or account_value
             _notify_daily_limit(
                 _webhook_str(settings),
-                loss_pct=(daily_ref - account_value) / daily_ref if daily_ref > 0 else 0.0,
+                loss_pct=(daily_ref - account_value) / daily_ref
+                if daily_ref > 0
+                else 0.0,
                 account_value=account_value,
             )
             _render_and_submit_risk_liquidation(
@@ -985,7 +993,9 @@ def _execute_trading_cycle(
                 )
                 return True
             if ev_should_reduce:
-                logger.info("EV reduce condition active: halving effective position weight")
+                logger.info(
+                    "EV reduce condition active: halving effective position weight"
+                )
                 console.print("EV reduce active: position weight halved for this cycle")
 
         effective_max_weight = _effective_max_position_weight(
@@ -1171,7 +1181,9 @@ def run_paper_repair(
     owns_trade_client = trade_client is None
     owns_state_store = state_store is None
     if owns_quote_client:
-        quote_client = MoomooOpenDClient(host=settings.opend_host, port=settings.opend_port)
+        quote_client = MoomooOpenDClient(
+            host=settings.opend_host, port=settings.opend_port
+        )
     if owns_trade_client:
         trade_client = MoomooPaperTradeClient(
             host=settings.opend_host, port=settings.opend_port, trd_env=TrdEnv.SIMULATE
@@ -1194,7 +1206,9 @@ def run_paper_repair(
 
         market_state = _fetch_market_state(quote_client, benchmark_symbol)
         market_open = _is_regular_market_open(market_state)
-        latest_prices = _snapshot_latest_prices(quote_client, list(signed_positions.keys()))
+        latest_prices = _snapshot_latest_prices(
+            quote_client, list(signed_positions.keys())
+        )
         repair_orders = _build_paper_repair_orders(
             position_frame,
             latest_prices,
@@ -1220,7 +1234,9 @@ def run_paper_repair(
 
         if clear_local_state:
             matching_active_order = False
-            get_matching_active_order = getattr(trade_client, "get_matching_active_order", None)
+            get_matching_active_order = getattr(
+                trade_client, "get_matching_active_order", None
+            )
             if callable(get_matching_active_order):
                 matching_active_order = any(
                     get_matching_active_order(order, refresh_cache=True) is not None
@@ -1308,7 +1324,9 @@ def run_auto_monitor(
     if settings.health_check_enabled:
         health_server = _HealthCheckServer(port=settings.health_check_port)
         health_server.start()
-        logger.info("Health check server started on port %d", settings.health_check_port)
+        logger.info(
+            "Health check server started on port %d", settings.health_check_port
+        )
 
     # Create a shared StateStore so daily summary can be queried after each cycle.
     owns_state_store = state_store is None
@@ -1377,10 +1395,18 @@ def run_auto_monitor(
                     latest_equity.account_value if latest_equity is not None else None
                 )
 
-                if current_date is not None and last_summary_date is not None and current_date != last_summary_date:
+                if (
+                    current_date is not None
+                    and last_summary_date is not None
+                    and current_date != last_summary_date
+                ):
                     # New trading day — send summary for the completed day.
-                    prev_equity = state_store.get_latest_equity_before_market_date(current_date)
-                    prev_value = prev_equity.account_value if prev_equity else current_value
+                    prev_equity = state_store.get_latest_equity_before_market_date(
+                        current_date
+                    )
+                    prev_value = (
+                        prev_equity.account_value if prev_equity else current_value
+                    )
                     if current_value is not None:
                         peak_state = state_store.load_risk_state()
                         peak = peak_state.peak_account_value or current_value
@@ -1396,7 +1422,9 @@ def run_auto_monitor(
                         )
                         drawdown = (peak - current_value) / peak if peak > 0 else 0.0
                         try:
-                            positions = _json.loads(latest_equity.positions_json or "{}")
+                            positions = _json.loads(
+                                latest_equity.positions_json or "{}"
+                            )
                         except Exception:
                             positions = {}
                         _notify_daily_summary(
@@ -1455,4 +1483,3 @@ def run_auto_monitor(
             health_server.stop()
         if owns_state_store:
             state_store.close()
-

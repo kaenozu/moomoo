@@ -100,9 +100,7 @@ def render_execution_report(
     summary_table.add_row("Total slippage", format_money(summary.total_slippage))
     summary_table.add_row("Realized PnL", format_money(summary.realized_pnl))
     summary_table.add_row("Last fill", str(summary.last_fill_at or "-"))
-    summary_table.add_row(
-        "Last realization", str(summary.last_realization_at or "-")
-    )
+    summary_table.add_row("Last realization", str(summary.last_realization_at or "-"))
     console.print(summary_table)
 
     if recent_fills:
@@ -453,8 +451,12 @@ def render_walk_forward_result(result) -> None:
     summary_table.add_row("Train Period (days)", str(result.train_period_days))
     summary_table.add_row("Test Period (days)", str(result.test_period_days))
     summary_table.add_row("OOS CAGR (avg)", format_percent(result.out_of_sample_cagr))
-    summary_table.add_row("OOS Max Drawdown (worst)", format_percent(result.out_of_sample_max_drawdown))
-    summary_table.add_row("OOS Sharpe (combined)", format_ratio(result.out_of_sample_sharpe))
+    summary_table.add_row(
+        "OOS Max Drawdown (worst)", format_percent(result.out_of_sample_max_drawdown)
+    )
+    summary_table.add_row(
+        "OOS Sharpe (combined)", format_ratio(result.out_of_sample_sharpe)
+    )
     summary_table.add_row("Winning Fold %", format_percent(result.winning_fold_pct))
     console.print(summary_table)
 
@@ -474,4 +476,3 @@ def render_performance_metrics(metrics: dict) -> None:
             formatted = str(value)
         table.add_row(key.replace("_", " ").title(), formatted)
     console.print(table)
-
