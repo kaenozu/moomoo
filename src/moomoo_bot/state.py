@@ -7,7 +7,9 @@ Related: orchestrator.py, risk.py, notify.py.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -41,6 +43,7 @@ class PersistentRiskState:
     daily_order_date: str | None = None
     last_equity_value: float | None = None
     updated_at: str | None = None
+    rule_violation_count: int = 0
 
 
 @dataclass
@@ -179,6 +182,7 @@ class StateStore:
         )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         self._ensure_tables()
 
     def __enter__(self):
@@ -190,16 +194,26 @@ class StateStore:
         self.close()
 
     def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path), timeout=10)
-            self._conn.row_factory = sqlite3.Row
-            # Only set WAL mode once, not on every connection
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            # Optional: enable write-ahead log auto-checkpointing for better concurrency
-            self._conn.execute("PRAGMA wal_autocheckpoint=1000")
-            # Optional: foreign key constraints (disabled by default)
-            self._conn.execute("PRAGMA foreign_keys=ON")
-        return self._conn
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(str(self.db_path), timeout=10)
+                self._conn.row_factory = sqlite3.Row
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA wal_autocheckpoint=1000")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+            return self._conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def _ensure_tables(self) -> None:
         conn = self._connect()
@@ -306,6 +320,9 @@ class StateStore:
         self._ensure_column(
             conn, "order_history", "cumulative_slippage_amount", "REAL DEFAULT 0.0"
         )
+        self._ensure_column(
+            conn, "risk_state", "rule_violation_count", "INTEGER DEFAULT 0"
+        )
         conn.commit()
 
     def _ensure_column(
@@ -317,8 +334,6 @@ class StateStore:
     ) -> None:
         # Validate table and column names to prevent SQL injection
         # Only allow alphanumeric + underscores (standard SQL identifiers)
-        import re
-
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table_name):
             raise ValueError(f"Invalid table name: {table_name}")
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", column_name):
@@ -346,6 +361,7 @@ class StateStore:
             daily_order_date=row["daily_order_date"],
             last_equity_value=row["last_equity_value"],
             updated_at=row["updated_at"],
+            rule_violation_count=row["rule_violation_count"] or 0,
         )
 
     def save_risk_state(self, state: PersistentRiskState) -> None:
@@ -361,6 +377,7 @@ class StateStore:
                 daily_order_count = ?,
                 daily_order_date = ?,
                 last_equity_value = ?,
+                rule_violation_count = ?,
                 updated_at = ?
             WHERE id = 1
         """,
@@ -372,6 +389,7 @@ class StateStore:
                 state.daily_order_count,
                 state.daily_order_date,
                 state.last_equity_value,
+                state.rule_violation_count,
                 now,
             ),
         )
@@ -661,6 +679,36 @@ class StateStore:
         """Load equity history for health check (P4)."""
         return self.get_equity_curve()
 
+    def get_equity_at_month_start(self, market_date: str) -> EquitySnapshot | None:
+        """Get equity snapshot at or just before the first day of the month containing market_date."""
+        parts = market_date.split("-")
+        if len(parts) < 2:
+            return None
+        month_start = f"{parts[0]}-{parts[1]}-01"
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT *
+            FROM equity_curve
+            WHERE COALESCE(market_date, substr(timestamp, 1, 10)) <= ?
+            ORDER BY COALESCE(market_date, substr(timestamp, 1, 10)) DESC, id DESC
+            LIMIT 1
+            """,
+            (month_start,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _equity_snapshot_from_row(row)
+
+    def get_recent_realizations(self, n: int) -> list[TaxLotRealizationRecord]:
+        """Get the N most recent tax lot realizations, newest first."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM tax_lot_realizations ORDER BY id DESC LIMIT ?",
+            (n,),
+        ).fetchall()
+        return [_tax_lot_realization_from_row(r) for r in rows]
+
     def load_recent_orders(self, limit: int = 50) -> list[OrderRecord]:
         """Load recent orders (alias for get_recent_orders)."""
         return self.get_recent_orders(limit)
@@ -790,11 +838,6 @@ class StateStore:
         )
         conn.commit()
         return cursor.rowcount
-
-    def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
 
     def _record_execution_fill(
         self, conn: sqlite3.Connection, fill: ExecutionFillRecord

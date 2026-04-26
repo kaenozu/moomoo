@@ -28,7 +28,6 @@ def format_money(value: float) -> str:
     return f"{value:,.2f}"
 
 
-
 def render_backtest_result(
     result: BacktestResult,
     benchmark_label: str,
@@ -392,3 +391,87 @@ def render_order_response(instruction, response: pd.DataFrame) -> None:
         f"Submitted {instruction.side} {instruction.symbol} qty={instruction.quantity:.3f} "
         f"price={instruction.price:.2f} order_id={order_id} status={status}"
     )
+
+
+def render_cost_stress_result(results: dict[float, BacktestResult]) -> None:
+    """Render a table comparing backtest results across cost multipliers."""
+    table = Table(title="Cost Stress Analysis")
+    table.add_column("Cost Multiplier", justify="right")
+    table.add_column("CAGR", justify="right")
+    table.add_column("Max Drawdown", justify="right")
+    table.add_column("Sharpe", justify="right")
+    table.add_column("Calmar", justify="right")
+    table.add_column("Total Return", justify="right")
+    table.add_column("Outperformance", justify="right")
+    for multiplier in sorted(results):
+        r = results[multiplier]
+        table.add_row(
+            f"{multiplier:.1f}x",
+            format_percent(r.cagr),
+            format_percent(r.max_drawdown),
+            format_ratio(r.sharpe),
+            format_ratio(r.calmar),
+            format_percent(r.total_return),
+            format_percent(r.outperformance),
+        )
+    console.print(table)
+
+
+def render_walk_forward_result(result) -> None:
+    """Render walk-forward backtest results fold-by-fold plus summary."""
+    from moomoo_bot.backtest import WalkForwardResult
+
+    if not isinstance(result, WalkForwardResult):
+        console.print("[red]Invalid walk-forward result object.[/red]")
+        return
+
+    fold_table = Table(title="Walk-Forward Folds (Out-of-Sample)")
+    fold_table.add_column("Fold", justify="right")
+    fold_table.add_column("Test Start")
+    fold_table.add_column("Test End")
+    fold_table.add_column("CAGR", justify="right")
+    fold_table.add_column("Max DD", justify="right")
+    fold_table.add_column("Sharpe", justify="right")
+    fold_table.add_column("Outperf.", justify="right")
+    for fold in result.folds:
+        r = fold.result
+        fold_table.add_row(
+            str(fold.fold_index + 1),
+            str(fold.test_start)[:10],
+            str(fold.test_end)[:10],
+            format_percent(r.cagr),
+            format_percent(r.max_drawdown),
+            format_ratio(r.sharpe),
+            format_percent(r.outperformance),
+        )
+    console.print(fold_table)
+
+    summary_table = Table(title="Walk-Forward Summary")
+    summary_table.add_column("Metric", style="cyan")
+    summary_table.add_column("Value", justify="right")
+    summary_table.add_row("Folds", str(len(result.folds)))
+    summary_table.add_row("Train Period (days)", str(result.train_period_days))
+    summary_table.add_row("Test Period (days)", str(result.test_period_days))
+    summary_table.add_row("OOS CAGR (avg)", format_percent(result.out_of_sample_cagr))
+    summary_table.add_row("OOS Max Drawdown (worst)", format_percent(result.out_of_sample_max_drawdown))
+    summary_table.add_row("OOS Sharpe (combined)", format_ratio(result.out_of_sample_sharpe))
+    summary_table.add_row("Winning Fold %", format_percent(result.winning_fold_pct))
+    console.print(summary_table)
+
+
+def render_performance_metrics(metrics: dict) -> None:
+    """Render live-trading performance metrics from state store data."""
+    table = Table(title="Live Performance Metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    for key, value in metrics.items():
+        if isinstance(value, float):
+            if "pct" in key or "rate" in key or "ratio" in key or key.endswith("_pct"):
+                formatted = format_percent(value)
+            else:
+                formatted = f"{value:.4f}"
+        else:
+            formatted = str(value)
+        table.add_row(key.replace("_", " ").title(), formatted)
+    console.print(table)
+

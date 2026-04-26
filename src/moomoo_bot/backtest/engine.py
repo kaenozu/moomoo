@@ -6,6 +6,7 @@ Related: backtest/__init__.py, strategy modules.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import sqrt
 
@@ -248,38 +249,15 @@ def max_drawdown(curve: pd.Series) -> float:
     return float(drawdown.min())
 
 
-_annualized_return = annualized_return
-_sharpe_ratio = sharpe_ratio
-
-
-def _order_level_turnover(
-    previous_weights: dict[str, float], current_weights: dict[str, float]
-) -> tuple[int, float]:
-    order_count = 0
-    turnover = 0.0
-    symbols = set(previous_weights) | set(current_weights)
-    for symbol in symbols:
-        delta = abs(
-            float(current_weights.get(symbol, 0.0))
-            - float(previous_weights.get(symbol, 0.0))
-        )
-        if delta <= 1e-12:
-            continue
-        order_count += 1
-        turnover += delta
-    return order_count, turnover
-
-
 def sortino_ratio(returns: pd.Series) -> float:
     if len(returns) < 2:
         return 0.0
-    # Downside deviation
     downside = returns.copy()
     downside[downside > 0.0] = 0.0
     downside_dev = float(downside.std(ddof=0))
     if downside_dev == 0.0:
         return 0.0
-    excess_returns = returns.mean()  # Assume risk-free = 0
+    excess_returns = returns.mean()
     return float((excess_returns / downside_dev) * sqrt(252))
 
 
@@ -305,9 +283,219 @@ def max_drawdown_duration_days(curve: pd.Series) -> int:
     )
 
 
+def _order_level_turnover(
+    previous_weights: dict[str, float], current_weights: dict[str, float]
+) -> tuple[int, float]:
+    order_count = 0
+    turnover = 0.0
+    symbols = set(previous_weights) | set(current_weights)
+    for symbol in symbols:
+        delta = abs(
+            float(current_weights.get(symbol, 0.0))
+            - float(previous_weights.get(symbol, 0.0))
+        )
+        if delta <= 1e-12:
+            continue
+        order_count += 1
+        turnover += delta
+    return order_count, turnover
+
+
 _annualized_return = annualized_return
 _sharpe_ratio = sharpe_ratio
 _max_drawdown = max_drawdown
 _sortino_ratio = sortino_ratio
 _calmar_ratio = calmar_ratio
 _max_drawdown_duration_days = max_drawdown_duration_days
+
+
+# ---------------------------------------------------------------------------
+# Walk-forward, cost stress, regime classification
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WalkForwardFold:
+    fold_index: int
+    train_start: object
+    train_end: object
+    test_start: object
+    test_end: object
+    result: BacktestResult
+
+
+@dataclass(frozen=True)
+class WalkForwardResult:
+    train_period_days: int
+    test_period_days: int
+    folds: list[WalkForwardFold]
+    out_of_sample_cagr: float
+    out_of_sample_max_drawdown: float
+    out_of_sample_sharpe: float
+    winning_fold_pct: float
+
+    def summary(self) -> dict[str, float]:
+        return {
+            "out_of_sample_cagr": self.out_of_sample_cagr,
+            "out_of_sample_max_drawdown": self.out_of_sample_max_drawdown,
+            "out_of_sample_sharpe": self.out_of_sample_sharpe,
+            "winning_fold_pct": self.winning_fold_pct,
+            "fold_count": float(len(self.folds)),
+            "train_period_days": float(self.train_period_days),
+            "test_period_days": float(self.test_period_days),
+        }
+
+
+def run_walk_forward_backtest(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    strategy_factory: Callable[[], Strategy],
+    train_period_days: int = 504,
+    test_period_days: int = 126,
+    step_days: int | None = None,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+) -> WalkForwardResult:
+    """Run rolling walk-forward backtest.
+
+    Each fold trains on train_period_days and evaluates on the next test_period_days.
+    A fresh strategy instance is created for each fold via strategy_factory.
+    """
+    step = step_days if step_days is not None else test_period_days
+    prices = prices.sort_index()
+    benchmark = benchmark.sort_index().reindex(prices.index).ffill()
+    dates = prices.index
+    total_days = len(dates)
+    min_required = train_period_days + test_period_days
+    if total_days < min_required:
+        raise ValueError(
+            f"Not enough data: need {min_required} rows, got {total_days}"
+        )
+
+    folds: list[WalkForwardFold] = []
+    fold_index = 0
+    start_pos = 0
+    while start_pos + min_required <= total_days:
+        train_end_pos = start_pos + train_period_days
+        test_end_pos = train_end_pos + test_period_days
+        if test_end_pos > total_days:
+            break
+
+        train_prices = prices.iloc[start_pos:train_end_pos]
+        train_benchmark = benchmark.iloc[start_pos:train_end_pos]
+        test_prices = prices.iloc[train_end_pos - 1 : test_end_pos]
+        test_benchmark = benchmark.iloc[train_end_pos - 1 : test_end_pos]
+
+        strategy = strategy_factory()
+        reset_fn = getattr(strategy, "reset", None)
+        if callable(reset_fn):
+            reset_fn()
+        if len(train_prices) > 0:
+            for i in range(len(train_prices)):
+                strategy.decide(train_prices.iloc[: i + 1], train_prices.index[i])
+
+        if len(test_prices) < 2:
+            start_pos += step
+            fold_index += 1
+            continue
+
+        test_result = run_backtest(
+            test_prices,
+            test_benchmark,
+            strategy,
+            transaction_cost_bps=transaction_cost_bps,
+        )
+        folds.append(
+            WalkForwardFold(
+                fold_index=fold_index,
+                train_start=dates[start_pos],
+                train_end=dates[train_end_pos - 1],
+                test_start=dates[train_end_pos],
+                test_end=dates[min(test_end_pos - 1, total_days - 1)],
+                result=test_result,
+            )
+        )
+        start_pos += step
+        fold_index += 1
+
+    if not folds:
+        raise ValueError("No complete walk-forward folds could be generated")
+
+    oos_returns_all: list[float] = []
+    for fold in folds:
+        ret_series = fold.result.equity_curve.pct_change().dropna()
+        oos_returns_all.extend(ret_series.tolist())
+
+    oos_returns = pd.Series(oos_returns_all)
+    oos_cagr = sum(f.result.total_return for f in folds) / len(folds)
+    oos_max_dd = min(f.result.max_drawdown for f in folds)
+    oos_sharpe = _sharpe_ratio(oos_returns) if len(oos_returns) > 1 else 0.0
+    winning_folds = sum(1 for f in folds if f.result.outperformance >= 0.0)
+    winning_fold_pct = winning_folds / len(folds) if folds else 0.0
+
+    return WalkForwardResult(
+        train_period_days=train_period_days,
+        test_period_days=test_period_days,
+        folds=folds,
+        out_of_sample_cagr=oos_cagr,
+        out_of_sample_max_drawdown=oos_max_dd,
+        out_of_sample_sharpe=oos_sharpe,
+        winning_fold_pct=winning_fold_pct,
+    )
+
+
+def run_cost_stress_analysis(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    strategy_factory: Callable[[], Strategy],
+    base_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    multipliers: list[float] | None = None,
+) -> dict[float, BacktestResult]:
+    """Run backtests at multiple cost multipliers to assess robustness to friction."""
+    if multipliers is None:
+        multipliers = [1.0, 1.5, 2.0, 3.0]
+    results: dict[float, BacktestResult] = {}
+    for m in multipliers:
+        strategy = strategy_factory()
+        results[m] = run_backtest(
+            prices,
+            benchmark,
+            strategy,
+            transaction_cost_bps=base_bps * m,
+        )
+    return results
+
+
+def run_sensitivity_sweep(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    strategy_factory: Callable[[object], Strategy],
+    param_values: list[object],
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+) -> dict[object, BacktestResult]:
+    """Run backtests for a list of parameter values and return results keyed by value.
+
+    strategy_factory receives each param value and must return a fully configured Strategy.
+    """
+    results: dict[object, BacktestResult] = {}
+    for val in param_values:
+        strategy = strategy_factory(val)
+        results[val] = run_backtest(
+            prices,
+            benchmark,
+            strategy,
+            transaction_cost_bps=transaction_cost_bps,
+        )
+    return results
+
+
+def classify_regimes(benchmark: pd.Series, trend_days: int = 200) -> pd.Series:
+    """Classify each date as 'bull', 'bear', or 'neutral' based on price vs rolling mean.
+
+    Returns a Series of string labels aligned to the benchmark index.
+    Requires at least trend_days rows; earlier rows are labeled 'neutral'.
+    """
+    ma = benchmark.rolling(trend_days, min_periods=trend_days).mean()
+    regime = pd.Series("neutral", index=benchmark.index, dtype=object)
+    regime[benchmark > ma] = "bull"
+    regime[(benchmark < ma) & ma.notna()] = "bear"
+    return regime

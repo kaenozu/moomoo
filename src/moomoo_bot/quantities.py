@@ -1,3 +1,9 @@
+"""Quantity rounding utilities module.
+
+Purpose: Round fractional share quantities toward zero for order sizing.
+Related: paper.py, risk.py, orchestrator.py.
+"""
+
 from math import floor
 
 

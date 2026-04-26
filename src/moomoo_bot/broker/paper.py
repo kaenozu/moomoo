@@ -12,7 +12,6 @@ from math import isclose
 import pandas as pd
 from moomoo import (
     OpenSecTradeContext,
-    OrderStatus,
     OrderType,
     RET_OK,
     Session,
@@ -25,15 +24,15 @@ from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.row_utils import position_quantities_from_frame
 
 
-_ACTIVE_ORDER_STATUSES = {
-    OrderStatus.SUBMITTED,
-    OrderStatus.SUBMITTING,
-    OrderStatus.WAITING_SUBMIT,
-    OrderStatus.CANCELLING_ALL,
-    OrderStatus.CANCELLING_PART,
-    OrderStatus.CANCELLED_PART,
-    OrderStatus.FILLED_PART,
-}
+_ACTIVE_ORDER_STATUS_NAMES = frozenset({
+    "SUBMITTED",
+    "SUBMITTING",
+    "WAITING_SUBMIT",
+    "CANCELLING_ALL",
+    "CANCELLING_PART",
+    "CANCELLED_PART",
+    "FILLED_PART",
+})
 
 
 @dataclass
@@ -67,10 +66,36 @@ class MoomooPaperTradeClient:
 
         row = data.iloc[0]
         for field in ("total_assets", "power", "available_funds"):
-            value = row.get(field)
-            if value is not None and float(value) > 0.0:
-                return float(value)
+            value = _positive_float(row.get(field))
+            if value is not None:
+                return value
         raise DataError("Simulated account did not expose a positive account value")
+
+    def get_buying_power(self) -> float:
+        if self.trade_context is None:
+            raise BrokerConnectionError("trade context is not initialized")
+        ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
+        if ret != RET_OK:
+            mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
+            raise BrokerConnectionError(f"Failed to fetch {mode_name} account info: {data}")
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
+            raise DataError(f"{mode_name} account info did not return rows")
+
+        row = data.iloc[0]
+        for field in (
+            "available_funds",
+            "power",
+            "remaining_dtbp",
+            "usd_net_cash_power",
+            "avl_withdrawal_cash",
+            "cash",
+            "us_cash",
+        ):
+            value = _positive_float(row.get(field))
+            if value is not None:
+                return float(value)
+        return 0.0
 
     def get_position_frame(self) -> pd.DataFrame:
         if self.trade_context is None:
@@ -155,7 +180,7 @@ class MoomooPaperTradeClient:
 
 def _is_active_order_status(status: object) -> bool:
     normalized_status = str(status).strip().upper()
-    return normalized_status in _ACTIVE_ORDER_STATUSES
+    return normalized_status in _ACTIVE_ORDER_STATUS_NAMES
 
 
 def _normalize_text(value: object) -> str:
@@ -172,6 +197,19 @@ def _normalize_order_bool(value: object) -> bool:
         return value
     normalized = _normalize_text(value).upper()
     return normalized in {"TRUE", "1", "YES", "Y"}
+
+
+def _positive_float(value: object) -> float | None:
+    normalized_text = _normalize_text(value).upper()
+    if normalized_text in {"", "N/A", "NONE", "NAN"}:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric <= 0.0:
+        return None
+    return numeric
 
 
 def _quantity_matches(order_qty: object, instruction_qty: float) -> bool:

@@ -1,7 +1,7 @@
 """DataFrame row helper utilities.
 
 Purpose: Shared helpers for extracting normalized values from pandas rows.
-Related: cli_helpers.py, broker/paper.py.
+Related: cli_helpers.py, broker/paper.py, orchestrator.py, risk.py.
 """
 
 from __future__ import annotations
@@ -39,3 +39,24 @@ def position_quantities_from_frame(position_frame: pd.DataFrame) -> dict[str, fl
         if qty > 0.0:
             positions[code] = qty
     return positions
+
+
+def row_text(row: pd.Series, *column_names: str) -> str:
+    """Extract first non-null text value from row for given column names."""
+    for col in column_names:
+        if col in row and pd.notna(row[col]):
+            val = str(row[col]).strip()
+            if val:
+                return val
+    return ""
+
+
+def row_float(row: pd.Series, *column_names: str) -> float | None:
+    """Extract first non-null float value from row for given column names."""
+    for col in column_names:
+        if col in row and pd.notna(row[col]):
+            try:
+                return float(row[col])
+            except (TypeError, ValueError):
+                continue
+    return None

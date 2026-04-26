@@ -4,10 +4,11 @@ Purpose: Helper functions for CLI commands (parse, load, build strategy).
 Related: cli.py.
 """
 
+import logging
 from pathlib import Path
 
 import pandas as pd
-from moomoo import TrdEnv
+from moomoo import TrdEnv, TrdSide
 
 from moomoo_bot.broker import MoomooOpenDClient
 from moomoo_bot.row_utils import (
@@ -130,6 +131,11 @@ def submit_orders_with_duplicate_guard(
 ) -> int:
     submitted_count = 0
     for instruction in instructions:
+        skip_reason = _unsupported_order_reason(instruction)
+        if skip_reason is not None:
+            _render_unsupported_order_skip(mode_label, instruction, skip_reason)
+            continue
+
         duplicate_order = _find_duplicate_order(
             state_store, trade_client, instruction
         )
@@ -178,6 +184,24 @@ def _render_duplicate_skip(
         f"Skipping duplicate {mode_label} order for {instruction.symbol} qty={instruction.quantity:.3f} "
         f"price={instruction.price:.2f} order_id={order_id} status={order_status}"
     )
+
+
+def _render_unsupported_order_skip(mode_label: str, instruction, reason: str) -> None:
+    from moomoo_bot.cli_render import console
+
+    console.print(
+        f"Skipping {mode_label} order for {instruction.symbol} qty={instruction.quantity:.3f} "
+        f"price={instruction.price:.2f}: {reason}"
+    )
+
+
+def _unsupported_order_reason(instruction) -> str | None:
+    quantity = float(getattr(instruction, "quantity", 0.0) or 0.0)
+    if quantity <= 0.0:
+        return "quantity must be positive"
+    if getattr(instruction, "side", None) == TrdSide.BUY and quantity < 1.0:
+        return "quantity below broker minimum of 1 share"
+    return None
 
 
 def _submit_single_order(
@@ -273,6 +297,8 @@ def _persist_order_and_immediate_fill(state_store, order_record, response) -> No
 def _build_order_record(trade_client, instruction, response):
     from moomoo_bot.state import OrderRecord
 
+    _logger = logging.getLogger(__name__)
+
     order_id, status, filled_quantity = _extract_order_fields_from_response(response)
 
     if order_id is None:
@@ -284,6 +310,10 @@ def _build_order_record(trade_client, instruction, response):
         )
 
     if order_id is None:
+        _logger.warning(
+            "Could not determine order_id for %s %s qty=%.3f; skipping record.",
+            instruction.side, instruction.symbol, instruction.quantity,
+        )
         return None
 
     order_id_text = str(order_id).strip()
