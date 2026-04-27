@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 
 import pytest
 from moomoo import TrdEnv
@@ -16,6 +17,13 @@ from moomoo_bot.state import (
     TaxLotRealizationRecord,
 )
 from moomoo_bot.strategy.momentum import CoreSatelliteStrategy
+
+
+def test_cli_module_imports_without_circular_dependency() -> None:
+    imported = importlib.import_module("moomoo_bot.cli")
+
+    assert hasattr(imported, "app")
+    assert hasattr(imported, "paper_trade")
 
 
 def test_auto_run_delegates_to_orchestrator(monkeypatch) -> None:

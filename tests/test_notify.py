@@ -20,7 +20,7 @@ class TestSendWebhook:
         mock_response.status = 200
         with patch("moomoo_bot.notify.urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = mock_response
-            result = send_webhook("http://example.com/webhook", {"event": "test"})
+            result = send_webhook("https://example.com/webhook", {"event": "test"})
             assert result is True
             mock_urlopen.assert_called_once()
             request = mock_urlopen.call_args[0][0]
@@ -31,21 +31,25 @@ class TestSendWebhook:
         assert send_webhook("", {"event": "test"}) is False
         assert send_webhook(None, {"event": "test"}) is False
 
+    def test_send_webhook_rejects_http_url(self):
+        result = send_webhook("http://example.com/webhook", {"event": "test"})
+        assert result is False
+
     def test_send_webhook_failure_returns_false(self):
         with patch("moomoo_bot.notify.urlopen", side_effect=URLError("timeout")):
-            result = send_webhook("http://example.com/webhook", {"event": "test"})
+            result = send_webhook("https://example.com/webhook", {"event": "test"})
             assert result is False
 
     def test_send_webhook_url_error_returns_false(self):
         with patch(
             "moomoo_bot.notify.urlopen", side_effect=OSError("connection refused")
         ):
-            result = send_webhook("http://example.com/webhook", {"event": "test"})
+            result = send_webhook("https://example.com/webhook", {"event": "test"})
             assert result is False
 
     def test_send_webhook_timeout_returns_false(self):
         with patch("moomoo_bot.notify.urlopen", side_effect=TimeoutError("timeout")):
-            result = send_webhook("http://example.com/webhook", {"event": "test"})
+            result = send_webhook("https://example.com/webhook", {"event": "test"})
             assert result is False
 
     def test_send_webhook_non_200_status(self):
@@ -53,7 +57,7 @@ class TestSendWebhook:
         mock_response.status = 404
         with patch("moomoo_bot.notify.urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = mock_response
-            result = send_webhook("http://example.com/webhook", {"event": "test"})
+            result = send_webhook("https://example.com/webhook", {"event": "test"})
             assert result is False
 
 
