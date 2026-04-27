@@ -24,8 +24,7 @@ def activate_kill_switch() -> None:
 
 def deactivate_kill_switch() -> None:
     """Remove the kill switch file."""
-    if _KILL_SWITCH_FILE.exists():
-        _KILL_SWITCH_FILE.unlink()
+    _KILL_SWITCH_FILE.unlink(missing_ok=True)
 
 
 def kill_switch_path() -> Path:

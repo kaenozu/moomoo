@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     rebalance_days: int = Field(default=21, ge=1)
     min_hold_days: int = Field(default=0, ge=0)
     backtest_min_hold_days: int = Field(default=21, ge=0)
-    backtest_satellite_weight: float = -1.0
+    backtest_satellite_weight: float | None = None
     backtest_top_results: int = Field(default=5, ge=1)
     initial_capital: float = Field(default=100_000.0, gt=0.0)
     capital_currency: Literal["JPY", "USD"] = "JPY"

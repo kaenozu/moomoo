@@ -67,7 +67,16 @@ def build_paper_plan(
     if fractional_share_precision <= 0.0:
         raise ValueError("fractional_share_precision must be positive")
 
-    latest_prices = prices.loc[: decision.as_of].iloc[-1]
+    price_slice = prices.loc[: decision.as_of]
+    if price_slice.empty:
+        return PaperPlan(
+            as_of=decision.as_of,
+            capital=capital,
+            reason="empty_price_slice",
+            allocations=[],
+            cash_remaining=capital,
+        )
+    latest_prices = price_slice.iloc[-1]
     allocations: list[PaperAllocation] = []
     allocated_cost = 0.0
 

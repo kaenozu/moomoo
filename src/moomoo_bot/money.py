@@ -17,8 +17,8 @@ def convert_capital_to_usd(
 
     normalized_currency = currency.strip().upper()
     if normalized_currency == "USD":
-        return float(amount)
+        return round(float(amount), 2)
     if normalized_currency == "JPY":
-        return float(amount) / fx_jpy_per_usd
+        return round(float(amount) / fx_jpy_per_usd, 2)
 
     raise ValueError(f"unsupported capital currency: {currency}")

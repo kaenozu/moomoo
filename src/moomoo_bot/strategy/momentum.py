@@ -240,8 +240,12 @@ class CoreSatelliteStrategy:
         if callable(reset_strategy):
             reset_strategy()
 
+    _DELEGATED_ATTRS = frozenset({"config", "decide", "reset"})
+
     def __getattr__(self, name: str):
-        return getattr(self.strategy, name)
+        if name in self._DELEGATED_ATTRS:
+            return getattr(self.strategy, name)
+        raise AttributeError(name)
 
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         active_prices = prices.drop(columns=[self.benchmark_symbol], errors="ignore")

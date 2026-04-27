@@ -22,7 +22,7 @@ def test_risk_defaults_are_conservative() -> None:
 def test_backtest_defaults_are_separated_from_trading_defaults() -> None:
     settings = Settings()
     assert settings.backtest_min_hold_days == 21
-    assert settings.backtest_satellite_weight == -1.0
+    assert settings.backtest_satellite_weight is None
     assert settings.backtest_top_results == 5
 
 

@@ -188,10 +188,11 @@ def run_auto_monitor(
                 trade_count += 1
 
                 if health_server is not None:
+                    cycle_risk_state = state_store.load_risk_state()
                     health_server.update_status(
                         is_healthy=True,
                         account_value=current_value,
-                        risk_halted=False,
+                        risk_halted=cycle_risk_state.halted,
                         trade_count=trade_count,
                     )
 

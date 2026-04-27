@@ -10,7 +10,7 @@ import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 from threading import Lock, Thread
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 
@@ -97,10 +97,11 @@ class HealthCheckServer:
 
     def _get_status(self) -> HealthStatus:
         with self._lock:
-            self._status.uptime_seconds = (
+            snapshot = replace(self._status)
+            snapshot.uptime_seconds = (
                 datetime.now(timezone.utc) - self._start_time
             ).total_seconds()
-            return self._status
+            return snapshot
 
     def start(self):
         """Start the health check server in a background thread."""

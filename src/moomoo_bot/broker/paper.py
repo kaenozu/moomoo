@@ -79,6 +79,18 @@ class MoomooPaperTradeClient:
         if self.trade_context is not None:
             self.trade_context.close()
 
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __enter__(self) -> MoomooPaperTradeClient:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
     def get_account_value(self) -> float:
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
@@ -93,11 +105,12 @@ class MoomooPaperTradeClient:
             raise DataError(f"{mode_name} account info did not return rows")
 
         row = data.iloc[0]
+        mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
         for field in ("total_assets", "power", "available_funds"):
             value = _positive_float(row.get(field))
             if value is not None:
                 return value
-        raise DataError("Simulated account did not expose a positive account value")
+        raise DataError(f"{mode_name} account did not expose a positive account value")
 
     def get_buying_power(self) -> float:
         if self.trade_context is None:
@@ -184,10 +197,7 @@ class MoomooPaperTradeClient:
     def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
-        # Limit remark to 64 bytes (UTF-8)
-        remark = instruction.reason or ""
-        remark_bytes = remark.encode("utf-8")[:64]
-        remark = remark_bytes.decode("utf-8", errors="ignore")
+        remark = (instruction.reason or "")[:64]
         ret, data = self.trade_context.place_order(
             price=instruction.price,
             qty=instruction.quantity,

@@ -81,6 +81,8 @@ def reprice_orders(instructions, latest_prices: dict[str, float]):
         price_val = latest_prices.get(instruction.symbol, instruction.price)
         if price_val is None:
             price_val = instruction.price if instruction.price is not None else 0.0
+        if float(price_val) <= 0.0:
+            continue
         repriced.append(
             replace(
                 instruction,
@@ -106,7 +108,11 @@ def signed_position_quantities(position_frame: pd.DataFrame) -> dict[str, float]
 def snapshot_latest_prices(
     quote_client: MoomooOpenDClient, symbol_universe: list[str]
 ) -> dict[str, float]:
-    snapshot = quote_client.fetch_market_snapshot(symbol_universe)
+    try:
+        snapshot = quote_client.fetch_market_snapshot(symbol_universe)
+    except Exception as exc:
+        logger.warning("Snapshot fetch failed in snapshot_latest_prices: %s", exc)
+        return {}
     latest_prices: dict[str, float] = {}
     for _, row in snapshot.iterrows():
         code = str(row.get("code", "")).strip()
@@ -190,7 +196,7 @@ def estimate_cash(
         float(quantity) * float(latest_prices.get(symbol, 0.0))
         for symbol, quantity in positions.items()
     )
-    return float(account_value - invested_value)
+    return max(0.0, float(account_value - invested_value))
 
 
 def record_state_snapshot(
@@ -252,7 +258,28 @@ def record_submitted_order_count(
     if submitted_order_count <= 0:
         return
     prepare_persistent_state_for_market_date(persistent_state, market_date)
-    persistent_state.daily_order_count += submitted_order_count
+
+    conn = getattr(state_store, "_connect", None)
+    write_lock = getattr(state_store, "_write_lock", None)
+    if callable(conn) and write_lock is not None:
+        db_conn = conn()
+        with write_lock:
+            db_conn.execute(
+                "UPDATE risk_state SET daily_order_count = COALESCE(daily_order_count, 0) + ?, "
+                "daily_order_date = ? WHERE id = 1",
+                (submitted_order_count, market_date),
+            )
+            db_conn.commit()
+            row = db_conn.execute(
+                "SELECT daily_order_count FROM risk_state WHERE id = 1"
+            ).fetchone()
+            persistent_state.daily_order_count = (
+                int(row["daily_order_count"]) if row else submitted_order_count
+            )
+        persistent_state.daily_order_date = market_date
+    else:
+        persistent_state.daily_order_count += submitted_order_count
+
     save_risk_state(
         state_store,
         risk_state,

@@ -7,12 +7,15 @@ Related: orchestrator.py, risk.py, notify.py.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_DIR = Path.home() / ".moomoo_bot"
 _DEFAULT_DB_NAME = "state.db"
@@ -183,6 +186,7 @@ class StateStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._ensure_tables()
 
     def __enter__(self):
@@ -319,6 +323,28 @@ class StateStore:
         )
         conn.commit()
 
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_order_history_order_id ON order_history(order_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_order_history_status ON order_history(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_tax_lots_symbol_status ON tax_lots(symbol, status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_equity_curve_market_date ON equity_curve(market_date)"
+        )
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_order_history_order_id_unique ON order_history(order_id)"
+            )
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "Duplicate order_id values found in order_history; skipping UNIQUE index"
+            )
+        conn.commit()
+
     def _ensure_column(
         self,
         conn: sqlite3.Connection,
@@ -361,33 +387,34 @@ class StateStore:
     def save_risk_state(self, state: PersistentRiskState) -> None:
         now = _utc_now_iso()
         conn = self._connect()
-        conn.execute(
-            """
-            UPDATE risk_state SET
-                peak_account_value = ?,
-                halted = ?,
-                halted_reason = ?,
-                drawdown_tier = ?,
-                daily_order_count = ?,
-                daily_order_date = ?,
-                last_equity_value = ?,
-                rule_violation_count = ?,
-                updated_at = ?
-            WHERE id = 1
-        """,
-            (
-                state.peak_account_value,
-                int(state.halted),
-                state.halted_reason,
-                state.drawdown_tier,
-                state.daily_order_count,
-                state.daily_order_date,
-                state.last_equity_value,
-                state.rule_violation_count,
-                now,
-            ),
-        )
-        conn.commit()
+        with self._write_lock:
+            conn.execute(
+                """
+                UPDATE risk_state SET
+                    peak_account_value = ?,
+                    halted = ?,
+                    halted_reason = ?,
+                    drawdown_tier = ?,
+                    daily_order_count = ?,
+                    daily_order_date = ?,
+                    last_equity_value = ?,
+                    rule_violation_count = ?,
+                    updated_at = ?
+                WHERE id = 1
+            """,
+                (
+                    state.peak_account_value,
+                    int(state.halted),
+                    state.halted_reason,
+                    state.drawdown_tier,
+                    state.daily_order_count,
+                    state.daily_order_date,
+                    state.last_equity_value,
+                    state.rule_violation_count,
+                    now,
+                ),
+            )
+            conn.commit()
 
     # --- Orders ---
 
@@ -400,46 +427,47 @@ class StateStore:
         order_id = (
             None if record.order_id is None else str(record.order_id).strip() or None
         )
-        cursor = conn.execute(
-            """
-            INSERT INTO order_history
+        with self._write_lock:
+            cursor = conn.execute(
+                """
+                INSERT INTO order_history
+                    (
+                        order_id,
+                        symbol,
+                        side,
+                        quantity,
+                        price,
+                        status,
+                        reason,
+                        filled_quantity,
+                        submitted_at,
+                        filled_at,
+                        broker_accepted_price,
+                        avg_fill_price,
+                        cumulative_fee_amount,
+                        cumulative_slippage_amount
+                    )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
                 (
                     order_id,
-                    symbol,
-                    side,
-                    quantity,
-                    price,
-                    status,
-                    reason,
-                    filled_quantity,
-                    submitted_at,
+                    record.symbol,
+                    record.side,
+                    record.quantity,
+                    record.price,
+                    normalized_status,
+                    record.reason,
+                    record.filled_quantity,
+                    record.submitted_at or _utc_now_iso(),
                     filled_at,
-                    broker_accepted_price,
-                    avg_fill_price,
-                    cumulative_fee_amount,
-                    cumulative_slippage_amount
-                )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                order_id,
-                record.symbol,
-                record.side,
-                record.quantity,
-                record.price,
-                normalized_status,
-                record.reason,
-                record.filled_quantity,
-                record.submitted_at or _utc_now_iso(),
-                filled_at,
-                record.broker_accepted_price,
-                record.avg_fill_price,
-                record.cumulative_fee_amount,
-                record.cumulative_slippage_amount,
-            ),
-        )
-        conn.commit()
-        return cursor.lastrowid
+                    record.broker_accepted_price,
+                    record.avg_fill_price,
+                    record.cumulative_fee_amount,
+                    record.cumulative_slippage_amount,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
 
     def update_order_status(
         self,
@@ -455,100 +483,117 @@ class StateStore:
         normalized_status = _normalize_order_status(status)
         if not normalized_status:
             return
-        order_row = conn.execute(
-            "SELECT * FROM order_history WHERE order_id = ? ORDER BY id DESC LIMIT 1",
-            (str(order_id),),
-        ).fetchone()
-        if order_row is None:
-            return
+        with self._write_lock:
+            conn.execute("BEGIN")
+            try:
+                order_row = conn.execute(
+                    "SELECT * FROM order_history WHERE order_id = ? ORDER BY id DESC LIMIT 1",
+                    (str(order_id),),
+                ).fetchone()
+                if order_row is None:
+                    conn.rollback()
+                    logger.warning(
+                        "Order %s not found in database, skipping status update",
+                        order_id,
+                    )
+                    return
 
-        previous_filled_quantity = float(order_row["filled_quantity"] or 0.0)
-        new_filled_quantity = max(float(filled_quantity), previous_filled_quantity)
-        fill_delta = (
-            (new_filled_quantity - previous_filled_quantity)
-            if (new_filled_quantity - previous_filled_quantity) > 1e-6
-            else 0.0
-        )
+                previous_filled_quantity = float(order_row["filled_quantity"] or 0.0)
+                new_filled_quantity = max(
+                    float(filled_quantity), previous_filled_quantity
+                )
+                fill_delta = (
+                    (new_filled_quantity - previous_filled_quantity)
+                    if (new_filled_quantity - previous_filled_quantity) > 1e-6
+                    else 0.0
+                )
 
-        previous_fee_total = float(order_row["cumulative_fee_amount"] or 0.0)
-        new_fee_total = previous_fee_total
-        if fee_amount is not None:
-            new_fee_total = max(float(fee_amount), previous_fee_total)
-        fee_delta = max(0.0, new_fee_total - previous_fee_total)
+                previous_fee_total = float(order_row["cumulative_fee_amount"] or 0.0)
+                new_fee_total = previous_fee_total
+                if fee_amount is not None:
+                    new_fee_total = max(float(fee_amount), previous_fee_total)
+                fee_delta = max(0.0, new_fee_total - previous_fee_total)
 
-        previous_avg_fill_price = _row_float_value(order_row["avg_fill_price"])
-        new_avg_fill_price = (
-            float(fill_price) if fill_price is not None else previous_avg_fill_price
-        )
-        derived_fill_price = _derive_incremental_fill_price(
-            previous_filled_quantity,
-            previous_avg_fill_price,
-            new_filled_quantity,
-            new_avg_fill_price,
-            float(order_row["price"]),
-        )
-        effective_filled_at = filled_at or _utc_now_iso()
-        effective_broker_price = (
-            float(broker_accepted_price)
-            if broker_accepted_price is not None
-            else _row_float_value(order_row["broker_accepted_price"])
-        )
-        if effective_broker_price is None:
-            effective_broker_price = float(order_row["price"])
-
-        previous_cumulative_slippage = float(
-            order_row["cumulative_slippage_amount"] or 0.0
-        )
-        slippage_delta = 0.0
-        if fill_delta > 0.0:
-            execution_fill = ExecutionFillRecord(
-                order_id=str(order_id),
-                symbol=str(order_row["symbol"]),
-                side=str(order_row["side"]),
-                fill_quantity=fill_delta,
-                intended_price=float(order_row["price"]),
-                broker_accepted_price=effective_broker_price,
-                fill_price=derived_fill_price,
-                fee_amount=fee_delta,
-                slippage_amount=_calculate_slippage_amount(
-                    str(order_row["side"]),
-                    fill_delta,
+                previous_avg_fill_price = _row_float_value(order_row["avg_fill_price"])
+                new_avg_fill_price = (
+                    float(fill_price)
+                    if fill_price is not None
+                    else previous_avg_fill_price
+                )
+                derived_fill_price = _derive_incremental_fill_price(
+                    previous_filled_quantity,
+                    previous_avg_fill_price,
+                    new_filled_quantity,
+                    new_avg_fill_price,
                     float(order_row["price"]),
-                    derived_fill_price,
-                ),
-                filled_at=effective_filled_at,
-            )
-            slippage_delta = execution_fill.slippage_amount
-            self._record_execution_fill(conn, execution_fill)
-            self._apply_execution_fill_to_tax_lots(conn, execution_fill)
+                )
+                effective_filled_at = filled_at or _utc_now_iso()
+                effective_broker_price = (
+                    float(broker_accepted_price)
+                    if broker_accepted_price is not None
+                    else _row_float_value(order_row["broker_accepted_price"])
+                )
+                if effective_broker_price is None:
+                    effective_broker_price = float(order_row["price"])
 
-        final_filled_at = (
-            effective_filled_at if _is_final_order_status(normalized_status) else None
-        )
-        conn.execute(
-            """
-            UPDATE order_history SET
-                status = ?,
-                filled_quantity = ?,
-                filled_at = COALESCE(?, filled_at),
-                broker_accepted_price = COALESCE(?, broker_accepted_price),
-                avg_fill_price = COALESCE(?, avg_fill_price),
-                cumulative_fee_amount = ?,
-                cumulative_slippage_amount = ?
-            WHERE order_id = ?
-        """,
-            (
-                normalized_status,
-                new_filled_quantity,
-                final_filled_at,
-                effective_broker_price,
-                new_avg_fill_price,
-                new_fee_total,
-                previous_cumulative_slippage + slippage_delta,
-                str(order_id),
-            ),
-        )
-        conn.commit()
+                previous_cumulative_slippage = float(
+                    order_row["cumulative_slippage_amount"] or 0.0
+                )
+                slippage_delta = 0.0
+                if fill_delta > 0.0:
+                    execution_fill = ExecutionFillRecord(
+                        order_id=str(order_id),
+                        symbol=str(order_row["symbol"]),
+                        side=str(order_row["side"]),
+                        fill_quantity=fill_delta,
+                        intended_price=float(order_row["price"]),
+                        broker_accepted_price=effective_broker_price,
+                        fill_price=derived_fill_price,
+                        fee_amount=fee_delta,
+                        slippage_amount=_calculate_slippage_amount(
+                            str(order_row["side"]),
+                            fill_delta,
+                            float(order_row["price"]),
+                            derived_fill_price,
+                        ),
+                        filled_at=effective_filled_at,
+                    )
+                    slippage_delta = execution_fill.slippage_amount
+                    self._record_execution_fill(conn, execution_fill)
+                    self._apply_execution_fill_to_tax_lots(conn, execution_fill)
+
+                final_filled_at = (
+                    effective_filled_at
+                    if _is_final_order_status(normalized_status)
+                    else None
+                )
+                conn.execute(
+                    """
+                    UPDATE order_history SET
+                        status = ?,
+                        filled_quantity = ?,
+                        filled_at = COALESCE(?, filled_at),
+                        broker_accepted_price = COALESCE(?, broker_accepted_price),
+                        avg_fill_price = COALESCE(?, avg_fill_price),
+                        cumulative_fee_amount = ?,
+                        cumulative_slippage_amount = ?
+                    WHERE order_id = ?
+                """,
+                    (
+                        normalized_status,
+                        new_filled_quantity,
+                        final_filled_at,
+                        effective_broker_price,
+                        new_avg_fill_price,
+                        new_fee_total,
+                        previous_cumulative_slippage + slippage_delta,
+                        str(order_id),
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def get_pending_orders(self) -> list[OrderRecord]:
         conn = self._connect()
@@ -630,20 +675,21 @@ class StateStore:
         market_date: str | None = None,
     ) -> None:
         conn = self._connect()
-        conn.execute(
-            """
-            INSERT INTO equity_curve (timestamp, account_value, cash, positions_json, market_date)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (
-                _utc_now_iso(),
-                account_value,
-                cash,
-                json.dumps(positions),
-                market_date,
-            ),
-        )
-        conn.commit()
+        with self._write_lock:
+            conn.execute(
+                """
+                INSERT INTO equity_curve (timestamp, account_value, cash, positions_json, market_date)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (
+                    _utc_now_iso(),
+                    account_value,
+                    cash,
+                    json.dumps(positions),
+                    market_date,
+                ),
+            )
+            conn.commit()
 
     def get_equity_curve(self, since: str | None = None) -> list[EquitySnapshot]:
         conn = self._connect()
@@ -674,8 +720,11 @@ class StateStore:
         return _equity_snapshot_from_row(row)
 
     def load_equity_history(self, limit: int = 1000) -> list[EquitySnapshot]:
-        """Load equity history for health check (P4)."""
-        return self.get_equity_curve()
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM equity_curve ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_equity_snapshot_from_row(r) for r in reversed(rows)]
 
     def get_equity_at_month_start(self, market_date: str) -> EquitySnapshot | None:
         """Get equity snapshot at or just before the first day of the month containing market_date."""
@@ -815,27 +864,29 @@ class StateStore:
     ) -> None:
         conn = self._connect()
         now = _utc_now_iso()
-        for symbol, qty in positions.items():
-            price = prices.get(symbol, 0.0)
-            conn.execute(
-                """
-                INSERT INTO position_log (timestamp, symbol, quantity, price, value)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                (now, symbol, qty, price, qty * price),
-            )
-        conn.commit()
+        with self._write_lock:
+            for symbol, qty in positions.items():
+                price = prices.get(symbol, 0.0)
+                conn.execute(
+                    """
+                    INSERT INTO position_log (timestamp, symbol, quantity, price, value)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (now, symbol, qty, price, qty * price),
+                )
+            conn.commit()
 
     # --- Housekeeping ---
 
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         conn = self._connect()
-        cursor = conn.execute(
-            "DELETE FROM equity_curve WHERE timestamp < datetime('now', ?)",
-            (f"-{keep_days} days",),
-        )
-        conn.commit()
-        return cursor.rowcount
+        with self._write_lock:
+            cursor = conn.execute(
+                "DELETE FROM equity_curve WHERE timestamp < datetime('now', ?)",
+                (f"-{keep_days} days",),
+            )
+            conn.commit()
+            return cursor.rowcount
 
     def _record_execution_fill(
         self, conn: sqlite3.Connection, fill: ExecutionFillRecord

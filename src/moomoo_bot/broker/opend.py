@@ -12,8 +12,12 @@ from datetime import date, timedelta
 from time import sleep
 from typing import Protocol
 
+import logging
+
 import pandas as pd
 from moomoo import AuType, KL_FIELD, KLType, OpenQuoteContext, RET_OK
+
+logger = logging.getLogger(__name__)
 
 
 _HISTORY_REQUEST_RETRIES = 3
@@ -205,6 +209,12 @@ def combine_price_series(
     price_frame = price_frame.dropna(how="any")
     if price_frame.empty:
         raise ValueError("No overlapping dates across the requested symbols")
+
+    dropped = set(series_by_symbol.keys()) - set(price_frame.columns)
+    if dropped:
+        logger.warning(
+            "Symbols dropped due to inner join producing all-NaN columns: %s", dropped
+        )
 
     benchmark = price_frame[benchmark_symbol].rename("benchmark")
     tradable = (
