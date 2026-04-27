@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from time import sleep
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -18,19 +19,28 @@ def send_webhook(url: str, payload: dict) -> bool:
     """Send a JSON payload to a webhook URL. Returns True on success."""
     if not url:
         return False
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        req = Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urlopen(req, timeout=10) as resp:
-            return 200 <= resp.status < 300
-    except (URLError, OSError, TimeoutError) as exc:
-        logger.warning("Webhook delivery failed: %s", exc)
-        return False
+    if not url.startswith("https"):
+        logger.warning("Webhook URL is not HTTPS: %s", url)
+    data = json.dumps(payload).encode("utf-8")
+    req = Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    for attempt in range(3):
+        try:
+            with urlopen(req, timeout=10) as resp:
+                return 200 <= resp.status < 300
+        except (URLError, OSError, TimeoutError) as exc:
+            if attempt < 2:
+                logger.debug(
+                    "Webhook attempt %d failed, retrying: %s", attempt + 1, exc
+                )
+                sleep(1.0)
+            else:
+                logger.warning("Webhook delivery failed after retries: %s", exc)
+    return False
 
 
 def notify_rebalance(

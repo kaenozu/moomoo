@@ -219,7 +219,7 @@ def _submit_single_order(
                     response,
                 )
         return 1
-    except Exception as exc:
+    except (RuntimeError, ValueError, OSError, ConnectionError) as exc:
         if _is_rejected_order_error(exc):
             from moomoo_bot.cli_render import console
 
@@ -227,6 +227,8 @@ def _submit_single_order(
                 f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
             )
             return 0
+        _logger = logging.getLogger(__name__)
+        _logger.warning("Order submission failed: %s", exc)
         raise
 
 
@@ -236,7 +238,15 @@ def _is_rejected_order_error(exc: Exception) -> bool:
     error_msg = str(exc).lower()
     return isinstance(exc, OrderRejectedError) or any(
         keyword in error_msg
-        for keyword in ["not enough", "insufficient", "invalid", "rejected"]
+        for keyword in [
+            "not enough",
+            "insufficient",
+            "invalid order",
+            "order rejected",
+            "not enough buying power",
+            "exceeds position limit",
+            "rejected",
+        ]
     )
 
 
@@ -249,8 +259,10 @@ def _persist_order_and_immediate_fill(state_store, order_record, response) -> No
         state_store.record_order(order_record)
         return
 
+    from moomoo_bot.state import OrderRecord
+
     state_store.record_order(
-        order_record.__class__(
+        OrderRecord(
             order_id=order_record.order_id,
             symbol=order_record.symbol,
             side=order_record.side,

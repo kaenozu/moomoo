@@ -82,11 +82,11 @@ def blend_result_with_benchmark(
         else 0.0
     )
 
-    sortino = _sortino_ratio(blended_returns.iloc[1:])
-    calmar = _calmar_ratio(
-        _annualized_return(blended_equity), _max_drawdown(blended_equity)
+    sortino = sortino_ratio(blended_returns.iloc[1:])
+    calmar = calmar_ratio(
+        annualized_return(blended_equity), max_drawdown(blended_equity)
     )
-    max_dd_duration = _max_drawdown_duration_days(blended_equity)
+    max_dd_duration = max_drawdown_duration_days(blended_equity)
 
     return BacktestResult(
         equity_curve=blended_equity,
@@ -95,11 +95,11 @@ def blend_result_with_benchmark(
         transaction_costs=strategy_result.transaction_costs,
         total_return=total_return,
         benchmark_return=benchmark_return,
-        cagr=_annualized_return(blended_equity),
-        benchmark_cagr=_annualized_return(strategy_result.benchmark_curve),
+        cagr=annualized_return(blended_equity),
+        benchmark_cagr=annualized_return(strategy_result.benchmark_curve),
         volatility=volatility,
-        sharpe=_sharpe_ratio(blended_returns.iloc[1:]),
-        max_drawdown=_max_drawdown(blended_equity),
+        sharpe=sharpe_ratio(blended_returns.iloc[1:]),
+        max_drawdown=max_drawdown(blended_equity),
         outperformance=total_return - benchmark_return,
         sortino=sortino,
         calmar=calmar,
@@ -184,18 +184,18 @@ def run_backtest(
     benchmark_total_return = float(
         benchmark_curve.iloc[-1] / benchmark_curve.iloc[0] - 1.0
     )
-    cagr = _annualized_return(equity_curve)
-    benchmark_cagr = _annualized_return(benchmark_curve)
+    cagr = annualized_return(equity_curve)
+    benchmark_cagr = annualized_return(benchmark_curve)
     volatility = (
         float(portfolio_return_series.std(ddof=0) * sqrt(252))
         if len(portfolio_return_series) > 1
         else 0.0
     )
-    sharpe = _sharpe_ratio(portfolio_return_series)
-    sortino = _sortino_ratio(portfolio_return_series)
-    max_drawdown = _max_drawdown(equity_curve)
-    max_dd_duration = _max_drawdown_duration_days(equity_curve)
-    calmar = _calmar_ratio(cagr, max_drawdown)
+    sharpe = sharpe_ratio(portfolio_return_series)
+    sortino = sortino_ratio(portfolio_return_series)
+    max_dd = max_drawdown(equity_curve)
+    max_dd_duration = max_drawdown_duration_days(equity_curve)
+    calmar = calmar_ratio(cagr, max_dd)
 
     return BacktestResult(
         equity_curve=equity_curve,
@@ -208,7 +208,7 @@ def run_backtest(
         benchmark_cagr=benchmark_cagr,
         volatility=volatility,
         sharpe=sharpe,
-        max_drawdown=max_drawdown,
+        max_drawdown=max_dd,
         outperformance=total_return - benchmark_total_return,
         sortino=sortino,
         calmar=calmar,
@@ -301,14 +301,6 @@ def _order_level_turnover(
     return order_count, turnover
 
 
-_annualized_return = annualized_return
-_sharpe_ratio = sharpe_ratio
-_max_drawdown = max_drawdown
-_sortino_ratio = sortino_ratio
-_calmar_ratio = calmar_ratio
-_max_drawdown_duration_days = max_drawdown_duration_days
-
-
 # ---------------------------------------------------------------------------
 # Walk-forward, cost stress, regime classification
 # ---------------------------------------------------------------------------
@@ -379,7 +371,7 @@ def run_walk_forward_backtest(
             break
 
         train_prices = prices.iloc[start_pos:train_end_pos]
-        benchmark.iloc[start_pos:train_end_pos]
+        _train_benchmark = benchmark.iloc[start_pos:train_end_pos]
         test_prices = prices.iloc[train_end_pos - 1 : test_end_pos]
         test_benchmark = benchmark.iloc[train_end_pos - 1 : test_end_pos]
 
@@ -426,7 +418,7 @@ def run_walk_forward_backtest(
     oos_returns = pd.Series(oos_returns_all)
     oos_cagr = sum(f.result.total_return for f in folds) / len(folds)
     oos_max_dd = min(f.result.max_drawdown for f in folds)
-    oos_sharpe = _sharpe_ratio(oos_returns) if len(oos_returns) > 1 else 0.0
+    oos_sharpe = sharpe_ratio(oos_returns) if len(oos_returns) > 1 else 0.0
     winning_folds = sum(1 for f in folds if f.result.outperformance >= 0.0)
     winning_fold_pct = winning_folds / len(folds) if folds else 0.0
 

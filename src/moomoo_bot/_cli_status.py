@@ -50,7 +50,10 @@ def status() -> None:
     table.add_row("Min holding days", str(settings.min_hold_days))
     table.add_row("Backtest min holding days", str(settings.backtest_min_hold_days))
     table.add_row(
-        "Backtest satellite weight", f"{settings.backtest_satellite_weight:.2f}"
+        "Backtest satellite weight",
+        f"{settings.backtest_satellite_weight:.2f}"
+        if settings.backtest_satellite_weight is not None
+        else "auto",
     )
     table.add_row("Backtest top results", str(settings.backtest_top_results))
     table.add_row("Top N", str(settings.top_n))

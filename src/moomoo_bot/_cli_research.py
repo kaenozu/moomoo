@@ -54,6 +54,7 @@ def backtest(
         load_price_frame as _load_price_frame,
     )
     from moomoo_bot.cli_render import (
+        console,
         render_backtest_result,
         render_satellite_results,
     )
@@ -104,7 +105,7 @@ def backtest(
     )
     candidate_weights = (
         [resolved_satellite_weight]
-        if resolved_satellite_weight >= 0
+        if resolved_satellite_weight is not None
         else default_satellite_weights()
     )
     candidates = search_satellite_candidates(
@@ -118,6 +119,9 @@ def backtest(
     ranked_candidates = sorted(
         candidates, key=lambda result: result.full_excess, reverse=True
     )
+    if not ranked_candidates:
+        console.print("[yellow]No candidates found.[/yellow]")
+        return
     best = ranked_candidates[0]
 
     strategy_description = (

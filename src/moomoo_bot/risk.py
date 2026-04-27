@@ -9,12 +9,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+import logging
+
 import pandas as pd
 from moomoo import Session, TrdSide
 
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.quantities import round_quantity_toward_zero
 from moomoo_bot.row_utils import row_text, row_float
+from moomoo_bot.state import TaxLotRealizationRecord
+
+logger = logging.getLogger(__name__)
+
+_DRAWDOWN_TIER1_THRESHOLD = 0.66
 
 
 @dataclass
@@ -53,7 +60,10 @@ def update_drawdown_state(
     max_drawdown_pct: float,
     max_drawdown_reset_pct: float = 0.0,
 ) -> str | None:
-    """Update drawdown state and manage tiers (Phase 2)."""
+    """Update drawdown state and manage tiers (Phase 2).
+
+    Mutates state in place and returns halt reason if any.
+    """
     if account_value <= 0.0:
         account_value = 0.0
 
@@ -85,7 +95,7 @@ def update_drawdown_state(
 
     # Gradual de-risking logic (Tiered drawdown)
     # Tier 0 -> Tier 1 (50% reduction) at 2/3 of max_drawdown_pct
-    tier1_threshold = max_drawdown_pct * 0.66
+    tier1_threshold = max_drawdown_pct * _DRAWDOWN_TIER1_THRESHOLD
     if state.drawdown_tier == 0 and drawdown_pct >= tier1_threshold:
         state.drawdown_tier = 1
         # We don't halt here, just signal to orchestrator to reduce positions
@@ -128,7 +138,7 @@ def detect_monthly_loss_limit(
 
 
 def detect_low_ev_condition(
-    realizations: list,
+    realizations: list[TaxLotRealizationRecord],
     lookback_n: int,
     halt_threshold: float,
     reduce_threshold: float,
@@ -208,7 +218,8 @@ def build_liquidation_orders(
         if sell_qty <= 0.0:
             continue
         if symbol not in latest_prices:
-            raise ValueError(f"missing latest price for liquidation symbol {symbol}")
+            logger.warning("No price for %s, skipping liquidation", symbol)
+            continue
         orders.append(
             PaperOrderInstruction(
                 symbol=symbol,

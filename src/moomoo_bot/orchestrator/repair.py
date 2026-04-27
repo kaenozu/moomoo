@@ -7,6 +7,7 @@ Related: orchestrator/__init__.py, orchestrator/helpers.py.
 from __future__ import annotations
 
 import logging
+import shutil
 from time import sleep
 
 from moomoo import Session, TrdEnv, TrdSide
@@ -83,6 +84,10 @@ def _build_paper_repair_orders(
 def _clear_state_files(state_store: StateStore) -> None:
     state_store.close()
     db_path = state_store.db_path
+    if db_path.exists():
+        backup_path = db_path.with_suffix(".db.bak")
+        shutil.copy2(str(db_path), str(backup_path))
+        logger.warning("Backing up and clearing state files: %s", db_path)
     for suffix in ("", "-wal", "-shm"):
         candidate = (
             db_path if suffix == "" else db_path.with_name(db_path.name + suffix)

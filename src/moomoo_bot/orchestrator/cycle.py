@@ -101,7 +101,7 @@ def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
     if pending_qty is not None and broker_qty is not None:
         return abs(pending_qty - broker_qty) < 1e-6
 
-    return True
+    return False
 
 
 def reconcile_pending_orders(state_store, trade_client) -> int:
@@ -133,8 +133,8 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
         return 0
 
     reconciled = 0
-    try:
-        for pending_order in pending_orders:
+    for pending_order in pending_orders:
+        try:
             for _, order_row in order_frame.iterrows():
                 if not _orch_module._broker_row_matches_order(order_row, pending_order):
                     continue
@@ -206,11 +206,11 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
                 )
                 reconciled += 1
                 break
-    except TypeError as exc:
-        logger.warning(
-            "Skipping pending order reconcile due to unexpected row type: %s", exc
-        )
-        return 0
+        except (TypeError, KeyError, AttributeError) as exc:
+            logger.warning(
+                "Skipping pending order reconcile due to unexpected row type: %s", exc
+            )
+            continue
 
     return reconciled
 
@@ -609,6 +609,7 @@ def execute_trading_cycle(
             buying_power_usd = float(buying_power_getter())
         except Exception as exc:
             logger.warning("Failed to resolve paper buying power: %s", exc)
+            requested_paper_capital_usd *= 0.5
         else:
             if buying_power_usd <= 0.0:
                 buying_power_usd = 0.0
@@ -705,6 +706,10 @@ def execute_trading_cycle(
             max_position_weight or settings.max_single_position_weight, risk_state
         )
         if ev_should_reduce:
+            logger.info(
+                "EV reduce: halving max position weight to %.2f",
+                effective_max_weight * 0.5,
+            )
             effective_max_weight = effective_max_weight * 0.5
 
         decision = strategy.decide(price_frame, price_frame.index[-1])

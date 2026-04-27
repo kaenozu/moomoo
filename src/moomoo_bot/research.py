@@ -13,10 +13,10 @@ import pandas as pd
 
 from moomoo_bot.backtest import BacktestResult, run_backtest
 from moomoo_bot.backtest.engine import (
-    blend_result_with_benchmark,
-    annualized_return,
-    sharpe_ratio,
-    max_drawdown,
+    blend_result_with_benchmark as _blend_with_benchmark,
+    annualized_return as _annualized_return,
+    sharpe_ratio as _sharpe_ratio,
+    max_drawdown as _max_drawdown,
 )
 from moomoo_bot.strategy.momentum import (
     MonthlyMomentumRotationConfig,
@@ -268,23 +268,6 @@ def search_momentum_candidates(
         regime_lookback_days,
         regime_min_segment_days,
     )
-    _rolling_walk_forward_boundaries(
-        prices.index,
-        train_size=_resolved_walk_forward_train_size(
-            len(prices.index), walk_forward_train_size, walk_forward_test_size
-        ),
-        test_size=_resolved_walk_forward_test_size(
-            len(prices.index), walk_forward_test_size
-        ),
-        step_size=_resolved_walk_forward_step_size(
-            len(prices.index), walk_forward_step_size, walk_forward_test_size
-        ),
-    )
-    _derive_market_regime_segments(
-        benchmark,
-        lookback_days=regime_lookback_days,
-        min_segment_days=regime_min_segment_days,
-    )
 
     ranked_results: list[MomentumSearchResult] = []
     for config in candidate_configs:
@@ -343,23 +326,6 @@ def search_satellite_candidates(
         walk_forward_step_size,
         regime_lookback_days,
         regime_min_segment_days,
-    )
-    _rolling_walk_forward_boundaries(
-        prices.index,
-        train_size=_resolved_walk_forward_train_size(
-            len(prices.index), walk_forward_train_size, walk_forward_test_size
-        ),
-        test_size=_resolved_walk_forward_test_size(
-            len(prices.index), walk_forward_test_size
-        ),
-        step_size=_resolved_walk_forward_step_size(
-            len(prices.index), walk_forward_step_size, walk_forward_test_size
-        ),
-    )
-    _derive_market_regime_segments(
-        benchmark,
-        lookback_days=regime_lookback_days,
-        min_segment_days=regime_min_segment_days,
     )
 
     ranked_results: list[SatelliteSearchResult] = []
@@ -630,14 +596,3 @@ def _ranking_key(result: _SearchResultBase) -> tuple[float, ...]:
         result.train_excess,
         result.full_excess,
     )
-
-
-def _blend_with_benchmark(
-    strategy_result: BacktestResult, satellite_weight: float
-) -> BacktestResult:
-    return blend_result_with_benchmark(strategy_result, satellite_weight)
-
-
-_annualized_return = annualized_return
-_sharpe_ratio = sharpe_ratio
-_max_drawdown = max_drawdown
