@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 from moomoo import TrdSide
 
 from moomoo_bot.cli_helpers import submit_orders_with_duplicate_guard
+from moomoo_bot.exceptions import OrderRejectedError
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.state import OrderRecord, StateStore
 
@@ -19,6 +22,19 @@ class FakeTradeClient:
     def submit_order(self, instruction):
         self.submit_calls += 1
         return self.response.copy()
+
+
+class RejectedTradeClient:
+    def __init__(self, message: str) -> None:
+        self.message = message
+        self.submit_calls = 0
+
+    def get_matching_active_order(self, instruction, refresh_cache: bool = True):
+        return None
+
+    def submit_order(self, instruction):
+        self.submit_calls += 1
+        raise OrderRejectedError(self.message)
 
 
 def test_submit_orders_records_immediate_fill_into_execution_ledger(tmp_path) -> None:
@@ -119,6 +135,55 @@ def test_submit_orders_skips_duplicate_when_pending_exists_in_state(tmp_path) ->
         state_store.close()
 
 
+def test_submit_orders_does_not_skip_stale_pending_state_order(tmp_path) -> None:
+    state_store = StateStore(db_path=tmp_path / "state.db")
+    trade_client = FakeTradeClient(
+        pd.DataFrame(
+            {
+                "order_id": ["new-1"],
+                "order_status": ["SUBMITTED"],
+                "filled_quantity": [0.0],
+            }
+        )
+    )
+    instruction = PaperOrderInstruction(
+        symbol="US.AMD",
+        side=TrdSide.BUY,
+        quantity=1.375,
+        price=305.33,
+        reason="monthly_top_momentum:US.AMD",
+    )
+
+    try:
+        stale_submitted_at = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        state_store.record_order(
+            OrderRecord(
+                order_id="stale-pending-1",
+                symbol="US.AMD",
+                side="BUY",
+                quantity=1.0,
+                price=305.33,
+                status="submitted",
+                reason="monthly_top_momentum:US.AMD",
+                filled_quantity=0.0,
+                submitted_at=stale_submitted_at,
+            )
+        )
+
+        submitted_count = submit_orders_with_duplicate_guard(
+            trade_client,
+            [instruction],
+            "paper",
+            lambda *_args, **_kwargs: None,
+            state_store=state_store,
+        )
+
+        assert submitted_count == 1
+        assert trade_client.submit_calls == 1
+    finally:
+        state_store.close()
+
+
 def test_submit_orders_skips_buy_orders_below_one_share(tmp_path) -> None:
     state_store = StateStore(db_path=tmp_path / "state.db")
     trade_client = FakeTradeClient(
@@ -149,5 +214,33 @@ def test_submit_orders_skips_buy_orders_below_one_share(tmp_path) -> None:
 
         assert submitted_count == 0
         assert trade_client.submit_calls == 0
+    finally:
+        state_store.close()
+
+
+def test_submit_orders_treats_order_rejected_error_as_skippable(tmp_path) -> None:
+    state_store = StateStore(db_path=tmp_path / "state.db")
+    trade_client = RejectedTradeClient(
+        "Failed to submit paper order for US.AVGO: Not enough positions"
+    )
+    instruction = PaperOrderInstruction(
+        symbol="US.AVGO",
+        side=TrdSide.BUY,
+        quantity=4010.0,
+        price=422.76,
+        reason="paper_repair:cover_short:US.AVGO",
+    )
+
+    try:
+        submitted_count = submit_orders_with_duplicate_guard(
+            trade_client,
+            [instruction],
+            "paper",
+            lambda *_args, **_kwargs: None,
+            state_store=state_store,
+        )
+
+        assert submitted_count == 0
+        assert trade_client.submit_calls == 1
     finally:
         state_store.close()

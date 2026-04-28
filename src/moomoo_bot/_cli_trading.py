@@ -10,10 +10,8 @@ from __future__ import annotations
 import typer
 from moomoo import TrdEnv
 
-from moomoo_bot._cli_app import app
+from moomoo_bot._cli_app import app, cli_module
 from moomoo_bot import orchestrator
-
-import moomoo_bot.cli as _cli
 
 
 def _require_paper_mode(settings, command_name: str) -> None:
@@ -61,6 +59,7 @@ def paper_run(
 ) -> None:
     from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_paper_mode(settings, "paper-run")
     orchestrator.run_one_shot_trade(
@@ -99,9 +98,15 @@ def paper_trade(
     minimum_order_value: float = typer.Option(
         5.0, min=0.0, help="Minimum order value used for fractional sizing."
     ),
+    local_sim: bool = typer.Option(
+        False,
+        "--local-sim",
+        help="Use local PaperSimulator only; skip Moomoo API paper account.",
+    ),
 ) -> None:
     from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_paper_mode(settings, "paper-trade")
     orchestrator.run_one_shot_trade(
@@ -114,6 +119,7 @@ def paper_trade(
         fx_jpy_per_usd=fx_jpy_per_usd,
         minimum_order_value=minimum_order_value,
         max_position_weight=settings.live_max_position_weight,
+        use_local_sim=local_sim,
     )
 
 
@@ -128,6 +134,7 @@ def paper_repair(
         help="Delete the local paper state DB after repair.",
     ),
 ) -> None:
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_paper_mode(settings, "paper-repair")
     orchestrator.run_paper_repair(
@@ -167,6 +174,7 @@ def live_trade(
 ) -> None:
     from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_live_mode(settings, "live-trade", confirm_live_trading)
     orchestrator.run_one_shot_trade(
@@ -213,6 +221,7 @@ def auto_run(
 ) -> None:
     from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_paper_mode(settings, "auto-run")
     orchestrator.run_auto_monitor(
@@ -234,6 +243,7 @@ def autopilot() -> None:
     """Start fully automated paper-trading loop using .env defaults only."""
     from moomoo_bot.cli_render import console
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     _require_paper_mode(settings, "autopilot")
     console.print("[bold green]Autopilot mode started[/bold green]")

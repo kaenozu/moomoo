@@ -3,11 +3,13 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from moomoo_bot.research import (
+from moomoo_bot.backtest.engine import annualized_return as _annualized_return
+from moomoo_bot.regime import (
     _derive_market_regime_segments,
-    _annualized_return,
     _rolling_walk_forward_boundaries,
     _split_period_boundaries,
+)
+from moomoo_bot.research import (
     default_momentum_search_configs,
     search_momentum_candidates,
     search_satellite_candidates,

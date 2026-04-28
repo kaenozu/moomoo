@@ -1,12 +1,30 @@
 """DataFrame row helper utilities.
 
-Purpose: Shared helpers for extracting normalized values from pandas rows.
-Related: cli_helpers.py, broker/paper.py, orchestrator.py, risk.py.
+Purpose: Shared helpers for extracting normalized values from pandas rows,
+         UTC timestamp generation, and side normalization.
+Related: cli_helpers.py, broker/paper.py, orchestrator/, risk.py, state.py.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
+
+
+def utc_now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_side(value: object) -> str:
+    """Normalize a trade side value to 'BUY', 'SELL', or the upper-cased text."""
+    text = str(value or "").strip().upper()
+    if "SELL" in text:
+        return "SELL"
+    if "BUY" in text:
+        return "BUY"
+    return text
 
 
 def first_non_null_row_value(row: pd.Series, candidate_fields: tuple[str, ...]):

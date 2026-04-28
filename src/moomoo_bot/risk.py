@@ -33,6 +33,15 @@ class RiskState:
 
 
 def detect_market_shock(benchmark_series: pd.Series, drop_pct: float) -> str | None:
+    """Detect if a market shock has occurred based on benchmark price drop.
+
+    Args:
+        benchmark_series: Series of benchmark prices
+        drop_pct: Threshold percentage drop that constitutes a shock (e.g., 0.05 for 5%)
+
+    Returns:
+        Shock reason string if shock detected, None otherwise
+    """
     if drop_pct <= 0.0:
         return None
 

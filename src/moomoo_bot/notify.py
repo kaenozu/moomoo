@@ -20,7 +20,8 @@ def send_webhook(url: str, payload: dict) -> bool:
     if not url:
         return False
     if not url.startswith("https"):
-        logger.warning("Webhook URL is not HTTPS: %s", url)
+        logger.warning("Webhook URL must use HTTPS: %s", url)
+        return False
     data = json.dumps(payload).encode("utf-8")
     req = Request(
         url,

@@ -82,8 +82,8 @@ class MoomooPaperTradeClient:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Error closing trade context in __del__: %s", exc)
 
     def __enter__(self) -> MoomooPaperTradeClient:
         return self

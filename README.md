@@ -10,6 +10,13 @@ The initial version is paper-trading-first and includes a strategy research/back
 python -m pip install -e .[dev]
 ```
 
+For the local UI paper simulator (no moomoo dependency for order execution):
+
+```bash
+python -m pip install -e .[dev,ui]
+streamlit run src/moomoo_bot/ui/paper_studio.py
+```
+
 ## Commands
 
 ```bash

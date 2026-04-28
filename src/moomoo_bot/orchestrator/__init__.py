@@ -7,6 +7,8 @@ Related: orchestrator/helpers.py, orchestrator/cycle.py, orchestrator/repair.py.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from moomoo import TrdEnv
 
 from moomoo_bot.cli_helpers import (  # noqa: F401
@@ -61,6 +63,9 @@ def run_one_shot_trade(
     strategy: Strategy | None = None,
     state_store: StateStore | None = None,
     submit_orders: bool = True,
+    use_local_sim: bool = False,
+    local_sim_path: Path | None = None,
+    local_sim_state_db_path: Path | None = None,
 ) -> None:
     _execute_trading_cycle(
         settings=settings,
@@ -79,4 +84,7 @@ def run_one_shot_trade(
         submit_orders=submit_orders,
         auto_mode=False,
         mode_label=_trade_mode_label(trade_env),
+        use_local_sim=use_local_sim,
+        local_sim_path=local_sim_path,
+        local_sim_state_db_path=local_sim_state_db_path,
     )

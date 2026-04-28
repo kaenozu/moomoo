@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 
 import pandas as pd
 import pytest
@@ -8,9 +9,10 @@ import pytest
 from moomoo import TrdEnv, TrdSide
 
 from moomoo_bot import orchestrator
+from moomoo_bot.orchestrator import cycle as orchestrator_cycle
 from moomoo_bot.config import Settings
 from moomoo_bot.paper import PaperPlan
-from moomoo_bot.state import EquitySnapshot, OrderRecord, PersistentRiskState
+from moomoo_bot.state import EquitySnapshot, OrderRecord, PersistentRiskState, StateStore
 from moomoo_bot.strategy.base import TradeDecision
 
 
@@ -327,6 +329,43 @@ def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
     assert state_store.saved_states == []
 
 
+def test_run_paper_repair_prefers_long_position_side_over_negative_qty(tmp_path) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+        state_db_path=tmp_path / "paper-state.db",
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(
+        position_frame=pd.DataFrame(
+            {
+                "code": ["US.AVGO"],
+                "qty": [-4010.0],
+                "position_side": ["LONG"],
+            }
+        )
+    )
+    state_store = FakeStateStore()
+
+    result = orchestrator.run_paper_repair(
+        settings=settings,
+        benchmark_symbol="US.VT",
+        quote_client=quote_client,
+        trade_client=trade_client,
+        state_store=state_store,
+        clear_local_state=False,
+    )
+
+    assert result is True
+    assert trade_client.submit_order_calls == 1
+    assert trade_client.submitted_instructions[0].side == TrdSide.SELL
+    assert trade_client.submitted_instructions[0].symbol == "US.AVGO"
+    assert trade_client.submitted_instructions[0].quantity == 4010.0
+
+
 def test_run_one_shot_trade_routes_zero_buying_power_to_repair(monkeypatch) -> None:
     settings = Settings(
         symbols="US.AAPL",
@@ -364,6 +403,42 @@ def test_run_one_shot_trade_routes_zero_buying_power_to_repair(monkeypatch) -> N
     assert captured["settings"] == settings
     assert captured["benchmark_symbol"] == "US.VT"
     assert captured["clear_local_state"] is True
+
+
+def test_run_one_shot_trade_zero_buying_power_falls_back_to_preview(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(buying_power=0.0)
+    strategy = FakeStrategy()
+
+    def fake_run_paper_repair(**_kwargs):
+        return True
+
+    monkeypatch.setattr(orchestrator, "run_paper_repair", fake_run_paper_repair)
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=1000.0,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        trade_client=trade_client,
+        strategy=strategy,
+        state_store=FakeStateStore(),
+    )
+
+    assert strategy.decide_calls == 1
+    assert trade_client.submit_order_calls == 0
 
 
 def test_run_one_shot_trade_caps_paper_capital_to_buying_power(monkeypatch) -> None:
@@ -993,6 +1068,191 @@ def test_market_date_for_frame_raises_on_nat_index() -> None:
 
     with pytest.raises(ValueError, match="cannot determine market date"):
         orchestrator._market_date_for_frame(frame)
+
+
+def test_run_one_shot_trade_local_sim_uses_equity_for_account_value(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+        daily_loss_limit_pct=0.05,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    state_store = FakeStateStore(
+        previous_equity=EquitySnapshot(
+            timestamp="2026-04-23T00:00:00+00:00",
+            account_value=100_000.0,
+            cash=100_000.0,
+            positions_json="{}",
+            market_date="2026-04-23",
+        )
+    )
+
+    sim_path = tmp_path / "paper-sim-state.json"
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+
+    from moomoo_bot.paper_simulator import PaperSimulator
+
+    sim = PaperSimulator.load(state_path=sim_path, initial_cash=1_000.0)
+    sim.place_market_order(symbol="US.AAPL", side="BUY", quantity=5.0, price=100.0)
+    sim.save()
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        strategy=strategy,
+        state_store=state_store,
+        use_local_sim=True,
+    )
+
+    assert state_store.recorded_equity
+    assert state_store.recorded_equity[-1]["account_value"] == pytest.approx(1027.8)
+    assert not state_store.saved_states or not state_store.saved_states[-1].halted
+
+
+def test_run_one_shot_trade_local_sim_persists_orders(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    state_store = FakeStateStore()
+
+    sim_path = tmp_path / "paper-sim-state.json"
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        strategy=strategy,
+        state_store=state_store,
+        use_local_sim=True,
+    )
+
+    payload = json.loads(sim_path.read_text(encoding="utf-8"))
+    assert payload["positions"]["US.AAPL"]["quantity"] == pytest.approx(947.0)
+    assert len(payload["trades"]) == 1
+
+
+def test_run_one_shot_trade_local_sim_bootstraps_empty_sim_from_jpy_capital(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="JPY",
+        initial_capital=100_000.0,
+        fx_jpy_per_usd=150.0,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    state_store = FakeStateStore()
+
+    sim_path = tmp_path / "paper-sim-state.json"
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=100_000.0,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        strategy=strategy,
+        state_store=state_store,
+        use_local_sim=True,
+    )
+
+    payload = json.loads(sim_path.read_text(encoding="utf-8"))
+    assert payload["cash"] == pytest.approx(33.31, abs=0.01)
+    assert payload["positions"]["US.AAPL"]["quantity"] == pytest.approx(6.0)
+    assert state_store.recorded_equity[-1]["account_value"] == pytest.approx(666.67, abs=0.01)
+
+
+def test_run_one_shot_trade_local_sim_bootstrap_clears_stale_state_db(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="JPY",
+        initial_capital=100_000.0,
+        fx_jpy_per_usd=150.0,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    sim_path = tmp_path / "paper-sim-state.json"
+    db_path = tmp_path / "paper-sim-state.db"
+
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_STATE_DB_PATH", db_path)
+
+    seeded_store = StateStore(db_path=db_path, execution_mode="paper")
+    seeded_store.save_risk_state(
+        PersistentRiskState(
+            peak_account_value=100_000.0,
+            halted=True,
+            halted_reason="max_drawdown:99.33% from 100000",
+            drawdown_tier=2,
+            daily_order_date="2026-04-24",
+            last_equity_value=100_000.0,
+        )
+    )
+    seeded_store.record_equity(
+        account_value=100_000.0,
+        cash=100_000.0,
+        positions={},
+        market_date="2026-04-24",
+    )
+    seeded_store.close()
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=100_000.0,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        quote_client=quote_client,
+        strategy=strategy,
+        use_local_sim=True,
+    )
+
+    verified_store = StateStore(db_path=db_path, execution_mode="paper")
+    persisted = verified_store.load_risk_state()
+    verified_store.close()
+    assert persisted.halted is False
+    assert persisted.halted_reason in (None, "")
 
 
 @dataclass
