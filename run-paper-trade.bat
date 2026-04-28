@@ -18,7 +18,7 @@ if not exist "%PYTHON%" (
 
 set "MOOMOO_BOT_EXECUTION_MODE=paper"
 
-echo Starting PAPER one-shot trade with production-matched behavior...
+echo Starting PAPER one-shot trade via Moomoo OpenD demo account...
 
 if "%FX_JPY_PER_USD%"=="" (
     "%PYTHON%" -m moomoo_bot.cli paper-trade --capital %CAPITAL% --history-days %HISTORY_DAYS%

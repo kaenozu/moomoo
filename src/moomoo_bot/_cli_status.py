@@ -12,15 +12,14 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
-from moomoo_bot._cli_app import app
-
-import moomoo_bot.cli as _cli
+from moomoo_bot._cli_app import app, cli_module
 
 
 @app.command()
 def status() -> None:
     from moomoo_bot.cli_render import console, format_percent
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     runtime_profile_drift = _cli.describe_runtime_profile_drift(settings)
     resolved_state_db_path = _cli.resolve_state_db_path(
@@ -98,6 +97,7 @@ def execution_report(
         None, help="Optional path to an alternate state.db file."
     ),
 ) -> None:
+    _cli = cli_module()
     settings = _cli.get_settings()
     state_store = _cli.StateStore(
         db_path=db_path or settings.state_db_path,
@@ -133,6 +133,7 @@ def performance(
 
     from moomoo_bot.cli_render import console, render_performance_metrics
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     state_path = _cli.resolve_state_db_path(settings)
     state_store = _cli.StateStore(state_path)

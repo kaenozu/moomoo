@@ -124,9 +124,12 @@ def _submit_single_order(
                 f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
             )
             return 0
-        _logger = logging.getLogger(__name__)
-        _logger.warning("Order submission failed: %s", exc)
-        raise
+        elif isinstance(exc, (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError)):
+            logger.warning("Order submission failed: %s", exc)
+            return 0
+        else:
+            logger.warning("Order submission failed: %s", exc)
+            raise
 
 
 def _is_rejected_order_error(exc: Exception) -> bool:

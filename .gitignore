@@ -14,6 +14,10 @@ htmlcov/
 .env.local
 .env.*.local
 .moomoo_bot/
+.moomoo_bot_equity
+.moomoo_bot_orders
+.moomoo_bot_state
 *.db
 *.db-shm
 *.db-wal
+backtest_results.csv

@@ -11,9 +11,7 @@ from pathlib import Path
 
 import typer
 
-from moomoo_bot._cli_app import app
-
-import moomoo_bot.cli as _cli
+from moomoo_bot._cli_app import app, cli_module
 
 
 @app.command()
@@ -64,6 +62,7 @@ def backtest(
         search_satellite_candidates,
     )
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     selected_symbols = _parse_symbols(symbols) or settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
@@ -170,6 +169,7 @@ def verify_api(
         render_snapshot,
     )
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     selected_symbols = _parse_symbols(symbols) or settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
@@ -228,6 +228,7 @@ def research(
         search_momentum_candidates,
     )
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     selected_symbols = _parse_symbols(symbols) or settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
@@ -289,6 +290,7 @@ def satellite(
         search_satellite_candidates,
     )
 
+    _cli = cli_module()
     settings = _cli.get_settings()
     selected_symbols = _parse_symbols(symbols) or settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
@@ -367,12 +369,14 @@ def validate(
         render_walk_forward_result,
     )
 
+    _cli = cli_module()
     settings = _cli.get_settings()
-    selected_symbols = _cli._parse_symbols(symbols) if symbols else settings.symbol_list
     if symbols:
         from moomoo_bot.cli_helpers import parse_symbols as _parse_symbols
 
         selected_symbols = _parse_symbols(symbols) or settings.symbol_list
+    else:
+        selected_symbols = settings.symbol_list
     benchmark_label = benchmark_symbol or settings.benchmark_symbol
     resolved_base_bps = (
         base_cost_bps if base_cost_bps is not None else settings.transaction_cost_bps

@@ -1,2 +1,0 @@
-[console_scripts]
-moomoo-bot = moomoo_bot.cli:app

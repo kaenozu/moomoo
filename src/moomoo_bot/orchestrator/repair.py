@@ -62,7 +62,14 @@ def _build_paper_repair_orders(
             continue
 
         position_side = _row_text(row, "position_side").upper()
-        is_short = quantity < 0.0 or position_side == "SHORT"
+        # Broker payloads can contain signed quantity noise in some edge cases.
+        # Prefer explicit side when present; only fall back to quantity sign.
+        if position_side == "SHORT":
+            is_short = True
+        elif position_side == "LONG":
+            is_short = False
+        else:
+            is_short = quantity < 0.0
         orders.append(
             PaperOrderInstruction(
                 symbol=symbol,
@@ -194,6 +201,20 @@ def run_paper_repair(
                         console.print(
                             "Paper repair orders were not accepted; local state kept."
                         )
+                        remaining_shorts = [
+                            (symbol, qty)
+                            for symbol, qty in refreshed_positions.items()
+                            if qty < 0.0
+                        ]
+                        if remaining_shorts:
+                            short_text = ", ".join(
+                                f"{symbol}({qty:.3f})"
+                                for symbol, qty in sorted(remaining_shorts)
+                            )
+                            console.print(
+                                "Broker still reports short positions after repair rejection: "
+                                f"{short_text}. Manual close or paper account reset may be required."
+                            )
                 else:
                     for _ in range(15):
                         refreshed_positions = signed_position_quantities(

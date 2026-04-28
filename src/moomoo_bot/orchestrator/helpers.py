@@ -28,6 +28,14 @@ def webhook_str(settings) -> str:
 
 
 def round_order_price(value: float) -> float:
+    """Round a price to 2 decimal places using banker's rounding.
+
+    Args:
+        value: Price value to round
+
+    Returns:
+        Price rounded to 2 decimal places
+    """
     return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 

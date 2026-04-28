@@ -117,7 +117,7 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
 
     try:
         order_frame = get_order_frame(refresh_cache=True)
-    except Exception as exc:
+    except (ConnectionError, TimeoutError, RuntimeError) as exc:
         logger.warning(
             "Skipping pending order reconcile after order fetch failed: %s", exc
         )
@@ -384,7 +384,7 @@ def execute_trading_cycle(
     if not use_local_sim and callable(buying_power_getter):
         try:
             buying_power_usd = float(buying_power_getter())
-        except Exception as exc:
+        except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
             logger.warning("Failed to resolve paper buying power: %s", exc)
             requested_paper_capital_usd *= 0.5
         else:
@@ -422,7 +422,7 @@ def execute_trading_cycle(
             if callable(buying_power_getter):
                 try:
                     refreshed_buying_power_usd = float(buying_power_getter())
-                except Exception as exc:
+                except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
                     logger.warning(
                         "Failed to refresh paper buying power after repair: %s", exc
                     )
