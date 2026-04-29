@@ -328,38 +328,33 @@ def execute_trading_cycle(
         notify_kill_switch(webhook_str(settings))
         return False
 
+    from contextlib import ExitStack
+
     owns_quote_client = quote_client is None
     # In local-sim mode we never create a real trade client.
     owns_trade_client = (not use_local_sim) and (trade_client is None)
     owns_state_store = state_store is None
-    if owns_quote_client:
-        quote_client = MoomooOpenDClient(
-            host=settings.opend_host, port=settings.opend_port
-        )
-    if owns_trade_client:
-        try:
+
+    with ExitStack() as stack:
+        if owns_quote_client:
+            quote_client = MoomooOpenDClient(
+                host=settings.opend_host, port=settings.opend_port
+            )
+            stack.enter_context(quote_client)
+        if owns_trade_client:
             trade_client = MoomooPaperTradeClient(
                 host=settings.opend_host, port=settings.opend_port, trd_env=trade_env
             )
-        except Exception:
-            if owns_quote_client:
-                quote_client.close()
-            raise
-    if owns_state_store:
-        try:
+            stack.enter_context(trade_client)
+        if owns_state_store:
             state_store = StateStore(
                 db_path=local_sim_state_db_path if use_local_sim else settings.state_db_path,
                 execution_mode=settings.execution_mode,
             )
-        except Exception:
-            if owns_trade_client and trade_client is not None:
-                trade_client.close()
-            if owns_quote_client and quote_client is not None:
-                quote_client.close()
-            raise
+            stack.enter_context(state_store)
 
-    paper_capital_usd = requested_paper_capital_usd
-    buying_power_usd: float | None = None
+        paper_capital_usd = requested_paper_capital_usd
+        buying_power_usd: float | None = None
 
     if use_local_sim:
         from moomoo_bot.paper_simulator import PaperSimulator
@@ -670,6 +665,11 @@ def execute_trading_cycle(
         return True
 
     finally:
+        if use_local_sim and _local_sim is not None:
+            try:
+                _local_sim.save()
+            except Exception as exc:
+                logger.warning("Failed to save local simulator state: %s", exc)
         if owns_state_store:
             state_store.close()
         if owns_trade_client:

@@ -39,3 +39,9 @@ class DataError(MoomooBotError):
     """Raised when data is missing or invalid."""
 
     pass
+
+
+class OrderTimeoutError(MoomooBotError):
+    """Raised when an order request times out."""
+
+    pass

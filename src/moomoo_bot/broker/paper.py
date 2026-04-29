@@ -197,27 +197,41 @@ class MoomooPaperTradeClient:
     def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
+        
         remark = (instruction.reason or "")[:64]
-        ret, data = self.trade_context.place_order(
-            price=instruction.price,
-            qty=instruction.quantity,
-            code=instruction.symbol,
-            trd_side=instruction.side,
-            order_type=OrderType.NORMAL,
-            trd_env=self.trd_env,
-            remark=remark,
-            session=instruction.session or Session.NONE,
-            fill_outside_rth=instruction.fill_outside_rth,
-        )
-        if ret != RET_OK:
-            mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
-            raise OrderRejectedError(
-                f"Failed to submit {mode_name} order for {instruction.symbol}: {data}"
-            )
-        if not isinstance(data, pd.DataFrame):
-            mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Paper"
-            raise DataError(f"{mode_name} order response did not return a DataFrame")
-        return data
+        
+        # 注文送信のリトライ回数を設ける (通信失敗に対する最低限の保護)
+        for attempt in range(1, _START_MAX_RETRIES + 1):
+            try:
+                ret, data = self.trade_context.place_order(
+                    price=instruction.price,
+                    qty=instruction.quantity,
+                    code=instruction.symbol,
+                    trd_side=instruction.side,
+                    order_type=OrderType.NORMAL,
+                    trd_env=self.trd_env,
+                    remark=remark,
+                    session=instruction.session or Session.NONE,
+                    fill_outside_rth=instruction.fill_outside_rth,
+                )
+                if ret != RET_OK:
+                    mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
+                    raise OrderRejectedError(
+                        f"Failed to submit {mode_name} order for {instruction.symbol}: {data}"
+                    )
+                if not isinstance(data, pd.DataFrame) or data.empty:
+                    raise DataError(f"Broker order response invalid: {data}")
+                return data
+            except Exception as exc:
+                if isinstance(exc, OrderRejectedError):
+                    raise
+                if attempt >= _START_MAX_RETRIES:
+                    raise OrderTimeoutError(f"Order submission failed after {attempt} attempts: {exc}") from exc
+                logger.warning("Order submission attempt %d failed, retrying...", attempt)
+                sleep(_START_RETRY_DELAY_SECONDS)
+        
+        raise OrderTimeoutError("Unexpected end of retry loop")
+
 
 
 def _is_active_order_status(status: object) -> bool:

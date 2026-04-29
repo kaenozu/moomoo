@@ -11,9 +11,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .base import Strategy, TradeDecision
-from ..broker.opend import MoomooOpenDClient
-from ..exceptions import DataError
+from .base import TradeDecision
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +40,9 @@ class RecommendationStrategy:
 
     def _get_quote_client(self) -> MoomooOpenDClient:
         if self._quote_client is None:
+            # Lazy import to avoid circular dependency
+            from ..broker.opend import MoomooOpenDClient
+
             self._quote_client = MoomooOpenDClient()
         return self._quote_client
 
