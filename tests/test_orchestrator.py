@@ -973,6 +973,12 @@ def test_run_one_shot_trade_closes_owned_clients_when_state_store_init_fails(
         def close(self) -> None:
             self.close_calls += 1
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.close()
+
     class TrackingTradeClient:
         def __init__(self):
             self.close_calls = 0
@@ -980,6 +986,11 @@ def test_run_one_shot_trade_closes_owned_clients_when_state_store_init_fails(
         def close(self) -> None:
             self.close_calls += 1
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.close()
     quote_client = TrackingQuoteClient()
     trade_client = TrackingTradeClient()
 
@@ -1153,7 +1164,7 @@ def test_run_one_shot_trade_local_sim_persists_orders(monkeypatch, tmp_path) -> 
     )
 
     payload = json.loads(sim_path.read_text(encoding="utf-8"))
-    assert payload["positions"]["US.AAPL"]["quantity"] == pytest.approx(947.0)
+    assert payload["positions"].get("US.AAPL", {}).get("quantity") == pytest.approx(947.0)
     assert len(payload["trades"]) == 1
 
 
@@ -1287,6 +1298,18 @@ class FakeQuoteClient:
     def close(self) -> None:
         return None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
 
 @dataclass
 class FakeTradeClient:
@@ -1331,6 +1354,18 @@ class FakeTradeClient:
     def close(self) -> None:
         return None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
 
 @dataclass
 class FakeStateStore:
@@ -1345,7 +1380,14 @@ class FakeStateStore:
     order_status_update_details: list[dict[str, object]] = field(default_factory=list)
     cleanup_calls: list[int] = field(default_factory=list)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
     def load_risk_state(self) -> PersistentRiskState:
+
         return PersistentRiskState(**self.risk_state.__dict__)
 
     def save_risk_state(self, state: PersistentRiskState) -> None:
@@ -1447,6 +1489,18 @@ class FakeStateStore:
 
     def close(self) -> None:
         return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 @dataclass

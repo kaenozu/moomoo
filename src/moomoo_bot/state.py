@@ -44,7 +44,7 @@ from moomoo_bot.state_ledger import (  # noqa: F401 — re-exported for backward
     _calculate_slippage_amount,
     _proportional_share,
 )
-from moomoo_bot.row_utils import normalize_side as _normalize_side, utc_now_iso as _utc_now_iso
+from moomoo_bot.row_utils import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,6 @@ class StateStore(_QueryMixin, _LedgerMixin):
         if not normalized_status:
             return
         with self._write_lock:
-            conn.execute("BEGIN")
             try:
                 order_row = conn.execute(
                     "SELECT * FROM order_history WHERE order_id = ? ORDER BY id DESC LIMIT 1",

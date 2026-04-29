@@ -16,6 +16,8 @@ from moomoo_bot.exceptions import OrderRejectedError
 from moomoo_bot.row_utils import first_non_null_frame_value, normalize_side
 from moomoo_bot.state import OrderRecord
 
+logger = logging.getLogger(__name__)
+
 _STATE_PENDING_DUPLICATE_MAX_AGE = timedelta(minutes=10)
 
 
@@ -117,7 +119,22 @@ def _submit_single_order(
                 )
         return 1
     except Exception as exc:
-        if _is_rejected_order_error(exc):
+        if isinstance(exc, OrderTimeoutError):
+            logger.warning(
+                "Order timed out, checking for existing order",
+                extra={"symbol": instruction.symbol, "error": str(exc)},
+            )
+            # 注文の照会を行い、既存の注文があればそれを反映する
+            matching_order = get_matching_active_order(trade_client, instruction)
+            if matching_order:
+                logger.info(
+                    "Found existing order matching timed out request",
+                    extra={"symbol": instruction.symbol, "matching_order": matching_order},
+                )
+                return 1
+            logger.warning("No existing order found after timeout, submission failed.", extra={"symbol": instruction.symbol})
+            return 0
+        elif _is_rejected_order_error(exc):
             from moomoo_bot.cli_render import console
 
             console.print(

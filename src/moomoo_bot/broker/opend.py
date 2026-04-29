@@ -48,6 +48,12 @@ class QuoteContext(Protocol):
         self, code_list: Sequence[str]
     ) -> tuple[int, pd.DataFrame | str]: ...
 
+    def __enter__(self) -> MoomooOpenDClient:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
     def close(self) -> None: ...
 
 
@@ -60,6 +66,12 @@ class MoomooOpenDClient:
     def __post_init__(self) -> None:
         if self.quote_context is None:
             self.quote_context = OpenQuoteContext(host=self.host, port=self.port)
+
+    def __enter__(self) -> MoomooOpenDClient:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
 
     def close(self) -> None:
         if self.quote_context is not None:

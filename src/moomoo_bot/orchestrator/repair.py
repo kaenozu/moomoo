@@ -37,6 +37,33 @@ from moomoo_bot.orchestrator.helpers import (
 
 logger = logging.getLogger(__name__)
 
+_POSITION_CLEAR_MAX_RETRIES = 15
+_POSITION_CLEAR_INTERVAL_SEC = 1.0
+
+
+def _wait_for_positions_cleared(
+    trade_client,
+    state_store,
+    *,
+    max_retries: int = _POSITION_CLEAR_MAX_RETRIES,
+    interval_sec: float = _POSITION_CLEAR_INTERVAL_SEC,
+) -> bool:
+    """Poll until broker reports no positions, then clear state files.
+
+    Returns True if positions were confirmed cleared, False otherwise.
+    """
+    for _ in range(max_retries):
+        refreshed_positions = signed_position_quantities(
+            trade_client.get_position_frame()
+        )
+        if not refreshed_positions:
+            _clear_state_files(state_store)
+            console.print("Local paper state cleared.")
+            return True
+        sleep(interval_sec)
+    console.print("Paper positions still remain; local state kept.")
+    return False
+
 
 def _build_paper_repair_orders(
     position_frame,
@@ -216,29 +243,9 @@ def run_paper_repair(
                                 f"{short_text}. Manual close or paper account reset may be required."
                             )
                 else:
-                    for _ in range(15):
-                        refreshed_positions = signed_position_quantities(
-                            trade_client.get_position_frame()
-                        )
-                        if not refreshed_positions:
-                            _clear_state_files(state_store)
-                            console.print("Local paper state cleared.")
-                            break
-                        sleep(1)
-                    else:
-                        console.print("Paper positions still remain; local state kept.")
+                    _wait_for_positions_cleared(trade_client, state_store)
             else:
-                for _ in range(15):
-                    refreshed_positions = signed_position_quantities(
-                        trade_client.get_position_frame()
-                    )
-                    if not refreshed_positions:
-                        _clear_state_files(state_store)
-                        console.print("Local paper state cleared.")
-                        break
-                    sleep(1)
-                else:
-                    console.print("Paper positions still remain; local state kept.")
+                _wait_for_positions_cleared(trade_client, state_store)
 
         return True
     finally:

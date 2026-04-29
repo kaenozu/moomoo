@@ -7,6 +7,7 @@ Related: orchestrator.py, broker modules.
 from __future__ import annotations
 
 import logging
+import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 from threading import Lock, Thread
@@ -15,6 +16,9 @@ from datetime import datetime, timezone
 
 
 logger = logging.getLogger(__name__)
+
+# Optional bearer token for health endpoint auth
+_HEALTH_AUTH_TOKEN = os.getenv("MOOMOO_BOT_HEALTH_TOKEN", "")
 
 
 @dataclass
@@ -35,6 +39,19 @@ class HealthRequestHandler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def do_GET(self):
+        # Token auth if configured
+        if _HEALTH_AUTH_TOKEN:
+            auth_header = self.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                self.send_response(401)
+                self.end_headers()
+                return
+            token = auth_header.split("Bearer ", 1)[1].strip()
+            if token != _HEALTH_AUTH_TOKEN:
+                self.send_response(403)
+                self.end_headers()
+                return
+
         try:
             status = self.status_getter()
             response = {
