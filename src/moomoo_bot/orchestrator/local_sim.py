@@ -64,6 +64,7 @@ def _sync_orders_to_local_simulator(
     orders: list,
     prices: dict[str, float],
     local_sim_path: Path | None = None,
+    sim=None,
 ) -> int:
     """Write executed/planned orders into the local PaperSimulator so the Streamlit UI reflects them."""
     if not orders:
@@ -72,7 +73,10 @@ def _sync_orders_to_local_simulator(
         from moomoo_bot.paper_simulator import PaperSimulator
 
         local_sim_path = local_sim_path or _LOCAL_SIM_PATH
-        sim = PaperSimulator.load(state_path=local_sim_path, initial_cash=100_000.0)
+        simulator = sim or PaperSimulator.load(
+            state_path=local_sim_path,
+            initial_cash=100_000.0,
+        )
         applied_count = 0
         for order in orders:
             symbol = str(order.symbol)
@@ -80,10 +84,15 @@ def _sync_orders_to_local_simulator(
             qty = float(order.quantity)
             px = float(prices.get(symbol, order.price))
             if qty > 0.0:
-                sim.place_market_order(symbol=symbol, side=side, quantity=qty, price=px)
+                simulator.place_market_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=qty,
+                    price=px,
+                )
                 applied_count += 1
-        sim.mark_to_market(prices)
-        sim.save()
+        simulator.mark_to_market(prices)
+        simulator.save()
         logger.info("Synced %d orders to local simulator (%s)", applied_count, local_sim_path)
         return applied_count
     except Exception as exc:  # noqa: BLE001

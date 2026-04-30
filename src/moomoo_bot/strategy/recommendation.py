@@ -6,14 +6,27 @@ Related: strategy/base.py, broker/opend.py.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import pandas as pd
 
 from .base import TradeDecision
 
 logger = logging.getLogger(__name__)
+
+
+class _QuoteClient(Protocol):
+    def close(self) -> None: ...
+
+
+def _build_quote_client() -> _QuoteClient:
+    # Lazy import avoids OpenD setup until a quote client is actually needed.
+    from ..broker.opend import MoomooOpenDClient
+
+    return MoomooOpenDClient()
 
 
 @dataclass(frozen=True)
@@ -34,16 +47,18 @@ class RecommendationConfig:
 class RecommendationStrategy:
     """Generate stock recommendations based on technical analysis."""
 
-    def __init__(self, config: RecommendationConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: RecommendationConfig | None = None,
+        quote_client_factory: Callable[[], _QuoteClient] | None = None,
+    ) -> None:
         self.config = config or RecommendationConfig()
-        self._quote_client: MoomooOpenDClient | None = None
+        self._quote_client_factory = quote_client_factory or _build_quote_client
+        self._quote_client: _QuoteClient | None = None
 
-    def _get_quote_client(self) -> MoomooOpenDClient:
+    def _get_quote_client(self) -> _QuoteClient:
         if self._quote_client is None:
-            # Lazy import to avoid circular dependency
-            from ..broker.opend import MoomooOpenDClient
-
-            self._quote_client = MoomooOpenDClient()
+            self._quote_client = self._quote_client_factory()
         return self._quote_client
 
     def close(self) -> None:

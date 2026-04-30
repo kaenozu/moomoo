@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from moomoo import TrdSide
 
-from moomoo_bot.exceptions import OrderRejectedError
+from moomoo_bot.exceptions import OrderRejectedError, OrderTimeoutError
 from moomoo_bot.row_utils import first_non_null_frame_value, normalize_side
 from moomoo_bot.state import OrderRecord
 

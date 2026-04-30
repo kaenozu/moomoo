@@ -16,7 +16,7 @@ from moomoo_bot.row_utils import normalize_side as _normalize_side, utc_now_iso 
 logger = logging.getLogger(__name__)
 
 
-def _row_float_value(value: object) -> float | None:
+def _row_float_value(value: str | int | float | None) -> float | None:
     if value is None:
         return None
     try:
@@ -79,7 +79,7 @@ def _proportional_share(
 class _LedgerMixin:
     def _record_execution_fill(
         self, conn: sqlite3.Connection, fill: ExecutionFillRecord
-    ) -> int:
+    ) -> int | None:
         cursor = conn.execute(
             """
             INSERT INTO execution_fill_ledger (
