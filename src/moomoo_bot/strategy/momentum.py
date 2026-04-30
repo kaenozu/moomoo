@@ -109,7 +109,7 @@ class MonthlyMomentumRotationStrategy:
 
         should_rebalance = (
             self._last_rebalance_length < 0
-            or (len(frame) - required_rows) % self.config.rebalance_days == 0
+            or (len(frame) - self._last_rebalance_length) >= self.config.rebalance_days
         )
         if should_rebalance:
             latest = frame.iloc[-1]
