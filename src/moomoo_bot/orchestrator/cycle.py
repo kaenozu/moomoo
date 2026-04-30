@@ -45,6 +45,7 @@ from moomoo_bot.orchestrator.helpers import (
     clear_expired_daily_loss_halt,
     daily_order_cap_reason,
     effective_max_position_weight,
+    is_daily_loss_halt,
     kill_switch_message,
     market_date_for_frame,
     overlay_latest_prices,
@@ -635,11 +636,13 @@ def execute_trading_cycle(
                     submitted_orders or 0,
                 )
             elif use_local_sim:
+                assert _local_sim is not None
                 all_cycle_orders = list(risk_orders) + list(instructions)
                 local_sim_applied_orders = _sync_orders_to_local_simulator(
                     all_cycle_orders,
                     latest_prices,
                     local_sim_path,
+                    sim=_local_sim,
                 )
                 console.print(
                     f"local-sim に {local_sim_applied_orders} 件の注文を反映しました。"
@@ -650,10 +653,12 @@ def execute_trading_cycle(
             console.print("No paper orders were required.")
 
         if use_local_sim and not instructions and risk_orders:
+            assert _local_sim is not None
             local_sim_applied_orders = _sync_orders_to_local_simulator(
                 list(risk_orders),
                 latest_prices,
                 local_sim_path,
+                sim=_local_sim,
             )
             console.print(
                 f"local-sim に {local_sim_applied_orders} 件の注文を反映しました。"

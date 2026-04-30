@@ -142,16 +142,26 @@ def test_recommendation_strategy_context_manager() -> None:
 
 def test_recommendation_strategy_close() -> None:
     """Test that closing the strategy works correctly."""
-    strategy = RecommendationStrategy()
+    class FakeQuoteClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_client = FakeQuoteClient()
+    strategy = RecommendationStrategy(quote_client_factory=lambda: fake_client)
     assert strategy._quote_client is None  # Not initialized yet
-    
+
     # Initialize client
-    _ = strategy._get_quote_client()
-    assert strategy._quote_client is not None
-    
+    client = strategy._get_quote_client()
+    assert client is fake_client
+    assert strategy._quote_client is fake_client
+
     # Close should clean up
     strategy.close()
-    # Note: The client might still exist but be closed
+    assert fake_client.closed is True
+    assert strategy._quote_client is None
 
 
 def test_recommendation_strategy_empty_symbols() -> None:

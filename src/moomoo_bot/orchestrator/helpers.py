@@ -305,7 +305,7 @@ def daily_loss_reference(state_store: StateStore, market_date: str) -> float | N
 
 
 def is_daily_loss_halt(reason: str | None) -> bool:
-    return bool(reason) and reason.startswith("daily_loss_limit:")
+    return isinstance(reason, str) and reason.startswith("daily_loss_limit:")
 
 
 def clear_expired_daily_loss_halt(
