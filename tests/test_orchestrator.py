@@ -148,15 +148,16 @@ def test_run_one_shot_trade_records_orders_and_reconciles_pending_orders() -> No
     )
 
     assert trade_client.get_order_frame_calls == 1
-    assert state_store.order_status_updates == [("pending-1", "filled_all", 2.0)]
-    assert state_store.order_status_update_details == [
-        {
-            "fill_price": 251.25,
-            "broker_accepted_price": 250.0,
-            "fee_amount": 1.75,
-            "filled_at": "2025-01-03T14:30:00+00:00",
-        }
+    assert state_store.order_status_updates == [
+        ("pending-1", "filled_all", 2.0),
+        ("1", "filled", 0.0),
     ]
+    assert state_store.order_status_update_details[0] == {
+        "fill_price": 251.25,
+        "broker_accepted_price": 250.0,
+        "fee_amount": 1.75,
+        "filled_at": "2025-01-03T14:30:00+00:00",
+    }
     assert state_store.recorded_orders[0].order_id == "1"
     assert state_store.recorded_orders[0].symbol == "US.AAPL"
 
@@ -816,7 +817,10 @@ def test_run_auto_monitor_cleans_equity_history_and_reconciles_pending_orders() 
     except KeyboardInterrupt:
         pass
 
-    assert state_store.order_status_updates == [("pending-1", "filled_all", 2.0)]
+    assert state_store.order_status_updates == [
+        ("pending-1", "filled_all", 2.0),
+        ("1", "filled", 0.0),
+    ]
     assert state_store.cleanup_calls == [30]
     assert trade_client.get_order_frame_calls == 1
     assert sleep_calls == [1]
@@ -1304,12 +1308,6 @@ class FakeQuoteClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
 
 @dataclass
 class FakeTradeClient:
@@ -1353,12 +1351,6 @@ class FakeTradeClient:
 
     def close(self) -> None:
         return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
     def __enter__(self):
         return self
@@ -1476,6 +1468,14 @@ class FakeStateStore:
                 cumulative_fee_amount=fee_amount or 0.0,
             )
             break
+
+    def update_order_id(self, old_order_id: str, new_order_id: str) -> None:
+        for index, order in enumerate(self.pending_orders):
+            if str(order.order_id) == str(old_order_id):
+                self.pending_orders[index].order_id = new_order_id
+        for index, order in enumerate(self.recorded_orders):
+            if str(order.order_id) == str(old_order_id):
+                self.recorded_orders[index].order_id = new_order_id
 
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         self.cleanup_calls.append(keep_days)

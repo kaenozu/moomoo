@@ -232,6 +232,7 @@ class StateStore(_QueryMixin, _LedgerMixin):
             return
         with self._write_lock:
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 order_row = conn.execute(
                     "SELECT * FROM order_history WHERE order_id = ? ORDER BY id DESC LIMIT 1",
                     (str(order_id),),
@@ -335,6 +336,25 @@ class StateStore(_QueryMixin, _LedgerMixin):
                         previous_cumulative_slippage + slippage_delta,
                         str(order_id),
                     ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    def update_order_id(self, old_order_id: str, new_order_id: str) -> None:
+        """Replace a temporary internal order_id with the actual broker order_id."""
+        conn = self._connect()
+        with self._write_lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "UPDATE order_history SET order_id = ? WHERE order_id = ?",
+                    (str(new_order_id), str(old_order_id))
+                )
+                conn.execute(
+                    "UPDATE execution_fill_ledger SET order_id = ? WHERE order_id = ?",
+                    (str(new_order_id), str(old_order_id))
                 )
                 conn.commit()
             except Exception:

@@ -97,24 +97,124 @@ class MonthlyMomentumRotationStrategy:
         self._last_rebalance_length = -1
 
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
-        # 既存の状態を保持したコピーで計算を行うか、副作用を最小限にする
         frame = prices.loc[:as_of].dropna(how="all")
-        # ... (中略、元の処理を維持しつつ状態管理を強化)
-        # 修正箇所: 内部状態更新を安全に行う
-        self._current_weights = {**preserved, **new_weights}
-        self._entry_index = {
-            symbol: self._entry_index.get(symbol, len(frame))
-            for symbol in self._current_weights
-        }
-        for symbol in new_weights:
-            self._entry_index[symbol] = len(frame)
-        self._last_rebalance_length = len(frame)
+        required_rows = max(
+            self.config.lookback_days + self.config.skip_days + 1,
+            self.config.trend_days + 1,
+        )
+        if len(frame) < required_rows:
+            return TradeDecision(
+                as_of=as_of, target_weights={}, reason="insufficient_history"
+            )
+
+        should_rebalance = (
+            self._last_rebalance_length < 0
+            or (len(frame) - required_rows) % self.config.rebalance_days == 0
+        )
+        if should_rebalance:
+            latest = frame.iloc[-1]
+            trend = frame.tail(self.config.trend_days).mean()
+            reference = frame.iloc[
+                -(self.config.lookback_days + self.config.skip_days + 1)
+            ]
+            momentum = latest.div(reference).sub(1.0)
+
+            eligible = momentum[(latest > trend) & momentum.notna()].sort_values(
+                ascending=False
+            )
+            selected_symbols = eligible.head(self.config.top_n).index.tolist()
+
+            if not selected_symbols:
+                preserved: dict[str, float] = {}
+                if self.config.min_hold_days > 0:
+                    for symbol, weight in self._current_weights.items():
+                        entry_index = self._entry_index.get(symbol)
+                        if (
+                            entry_index is not None
+                            and len(frame) - entry_index < self.config.min_hold_days
+                        ):
+                            preserved[symbol] = weight
+
+                fallback_weights: dict[str, float] = {}
+                if (
+                    self.config.fallback_asset_symbol
+                    and self.config.fallback_allocation > 0.0
+                ):
+                    remaining_weight = max(0.0, 1.0 - sum(preserved.values()))
+                    if remaining_weight > 0.0:
+                        fallback_share = min(
+                            remaining_weight, self.config.fallback_allocation
+                        )
+                        fallback_weights[self.config.fallback_asset_symbol] = (
+                            fallback_share
+                        )
+
+                self._current_weights = {**preserved, **fallback_weights}
+                self._entry_index = {
+                    symbol: self._entry_index.get(symbol, len(frame))
+                    for symbol in self._current_weights
+                }
+                reason = "no_symbols_above_trend"
+                if fallback_weights:
+                    reason += f":fallback_to:{self.config.fallback_asset_symbol}"
+            else:
+                held_over: dict[str, float] = {}
+                if self.config.min_hold_days > 0:
+                    for symbol, weight in self._current_weights.items():
+                        entry_index = self._entry_index.get(symbol)
+                        if (
+                            symbol not in selected_symbols
+                            and entry_index is not None
+                            and len(frame) - entry_index < self.config.min_hold_days
+                        ):
+                            held_over[symbol] = weight
+
+                remaining_weight = max(0.0, 1.0 - sum(held_over.values()))
+                new_symbols = [
+                    symbol for symbol in selected_symbols if symbol not in held_over
+                ]
+                new_weights: dict[str, float] = {}
+                if new_symbols and remaining_weight > 0.0:
+                    if self.config.inverse_volatility:
+                        vols: dict[str, float] = {}
+                        for symbol in new_symbols:
+                            returns = (
+                                frame[symbol]
+                                .tail(self.config.volatility_lookback_days)
+                                .pct_change()
+                                .dropna()
+                            )
+                            vol = returns.std()
+                            vols[symbol] = vol if vol > 0 else 1.0
+
+                        inverse_vols = {symbol: 1.0 / vol for symbol, vol in vols.items()}
+                        total_inverse_vol = sum(inverse_vols.values())
+                        new_weights = {
+                            symbol: (inverse_vols[symbol] / total_inverse_vol)
+                            * remaining_weight
+                            for symbol in new_symbols
+                        }
+                    else:
+                        share = remaining_weight / len(new_symbols)
+                        new_weights = {symbol: share for symbol in new_symbols}
+
+                self._current_weights = {**held_over, **new_weights}
+                self._entry_index = {
+                    symbol: self._entry_index.get(symbol, len(frame))
+                    for symbol in self._current_weights
+                }
+                for symbol in new_weights:
+                    self._entry_index[symbol] = len(frame)
+
+                reason = f"monthly_top_momentum:{','.join(selected_symbols)}"
+
+            self._last_rebalance_length = len(frame)
+        else:
+            reason = "hold"
 
         return TradeDecision(
             as_of=as_of, target_weights=self._current_weights, reason=reason
         )
-
-# ... (CoreSatelliteStrategy の修正)
 
 class CoreSatelliteStrategy:
     """Blend an active strategy sleeve with a benchmark core sleeve."""

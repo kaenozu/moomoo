@@ -74,8 +74,8 @@ class Settings(BaseSettings):
     max_daily_orders: int = Field(default=12, ge=1)
     monthly_loss_limit_pct: float = Field(default=0.15, ge=0.0, le=1.0)
     ev_lookback_trades: int = Field(default=20, ge=1)
-    ev_halt_threshold: float = 0.0
-    ev_reduce_threshold: float = 0.0
+    ev_halt_threshold: float = Field(default=0.0, ge=-1.0, le=1.0)
+    ev_reduce_threshold: float = Field(default=0.0, ge=-1.0, le=1.0)
     max_slippage_bps: float = Field(default=50.0, ge=0.0)
     autopilot_history_days: int = Field(default=2200, ge=60)
     autopilot_poll_seconds: int = Field(default=900, ge=60)

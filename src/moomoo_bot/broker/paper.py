@@ -21,7 +21,12 @@ from moomoo import (
     TrdMarket,
 )
 
-from moomoo_bot.exceptions import BrokerConnectionError, DataError, OrderRejectedError
+from moomoo_bot.exceptions import (
+    BrokerConnectionError,
+    DataError,
+    OrderRejectedError,
+    OrderTimeoutError,
+)
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.row_utils import position_quantities_from_frame
 
@@ -91,7 +96,7 @@ class MoomooPaperTradeClient:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    def get_account_value(self) -> float:
+    def _account_info_row(self) -> tuple[pd.Series, str]:
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
         ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
@@ -103,9 +108,11 @@ class MoomooPaperTradeClient:
         if not isinstance(data, pd.DataFrame) or data.empty:
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
             raise DataError(f"{mode_name} account info did not return rows")
-
-        row = data.iloc[0]
         mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
+        return data.iloc[0], mode_name
+
+    def get_account_value(self) -> float:
+        row, mode_name = self._account_info_row()
         for field in ("total_assets", "power", "available_funds"):
             value = _positive_float(row.get(field))
             if value is not None:
@@ -113,19 +120,7 @@ class MoomooPaperTradeClient:
         raise DataError(f"{mode_name} account did not expose a positive account value")
 
     def get_buying_power(self) -> float:
-        if self.trade_context is None:
-            raise BrokerConnectionError("trade context is not initialized")
-        ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
-        if ret != RET_OK:
-            mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise BrokerConnectionError(
-                f"Failed to fetch {mode_name} account info: {data}"
-            )
-        if not isinstance(data, pd.DataFrame) or data.empty:
-            mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
-            raise DataError(f"{mode_name} account info did not return rows")
-
-        row = data.iloc[0]
+        row, _mode_name = self._account_info_row()
         for field in (
             "available_funds",
             "power",

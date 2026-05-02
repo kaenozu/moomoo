@@ -116,18 +116,27 @@ def _build_paper_repair_orders(
 
 
 def _clear_state_files(state_store: StateStore) -> None:
-    state_store.close()
     db_path = state_store.db_path
     if db_path.exists():
         backup_path = db_path.with_suffix(".db.bak")
         shutil.copy2(str(db_path), str(backup_path))
-        logger.warning("Backing up and clearing state files: %s", db_path)
-    for suffix in ("", "-wal", "-shm"):
-        candidate = (
-            db_path if suffix == "" else db_path.with_name(db_path.name + suffix)
-        )
-        if candidate.exists():
-            candidate.unlink()
+        logger.warning("Backing up and clearing state data: %s", db_path)
+    
+    conn = state_store._connect()
+    with state_store._write_lock:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            tables = [row[0] for row in cursor.fetchall()]
+            for table in tables:
+                conn.execute(f"DELETE FROM {table}")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+            conn.execute("VACUUM")
+        except Exception:
+            conn.rollback()
+            raise
+    state_store.close()
 
 
 def run_paper_repair(

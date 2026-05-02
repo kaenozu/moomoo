@@ -36,9 +36,9 @@ class RecommendationStrategy:
 
     def __init__(self, config: RecommendationConfig | None = None) -> None:
         self.config = config or RecommendationConfig()
-        self._quote_client: MoomooOpenDClient | None = None
+        self._quote_client: object | None = None
 
-    def _get_quote_client(self) -> MoomooOpenDClient:
+    def _get_quote_client(self) -> object:
         if self._quote_client is None:
             # Lazy import to avoid circular dependency
             from ..broker.opend import MoomooOpenDClient

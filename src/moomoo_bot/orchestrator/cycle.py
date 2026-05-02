@@ -78,6 +78,9 @@ def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
         if pending_order.order_id is not None
         else None
     )
+    if pending_order_id and pending_order_id.startswith("internal_"):
+        pending_order_id = None
+
     broker_order_id = row_text(order_row, "order_id", "orderid", "id")
     if pending_order_id and broker_order_id:
         return pending_order_id == broker_order_id
@@ -146,6 +149,12 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
                     order_id = str(pending_order.order_id).strip()
                 if not order_id:
                     continue
+
+                if pending_order.order_id and str(pending_order.order_id).startswith("internal_"):
+                    update_order_id = getattr(state_store, "update_order_id", None)
+                    if callable(update_order_id):
+                        update_order_id(str(pending_order.order_id), order_id)
+                        pending_order.order_id = order_id
 
                 filled_quantity = row_float(
                     order_row,
@@ -665,8 +674,10 @@ def execute_trading_cycle(
         return True
 
     finally:
-        if use_local_sim and _local_sim is not None:
+        if use_local_sim and _local_sim is not None and local_sim_applied_orders == 0:
             try:
+                # When orders were synced through a freshly loaded simulator instance,
+                # saving the stale pre-sync object here would clobber persisted positions.
                 _local_sim.save()
             except Exception as exc:
                 logger.warning("Failed to save local simulator state: %s", exc)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
 
@@ -375,8 +377,6 @@ def test_paper_trade_client_raises_broker_connection_error_on_api_failure() -> N
 
 def test_paper_trade_client_raises_data_error_for_empty_account_info() -> None:
     from moomoo_bot.exceptions import DataError
-    from unittest.mock import MagicMock
-    import pandas as pd
 
     mock_ctx = MagicMock()
     mock_ctx.accinfo_query.return_value = (0, pd.DataFrame())
@@ -394,10 +394,53 @@ def test_paper_trade_client_raises_data_error_for_empty_account_info() -> None:
         raise AssertionError("Expected DataError")
 
 
-def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
-    from unittest.mock import MagicMock
-    import pandas as pd
+def test_paper_trade_client_account_value_prefers_total_assets() -> None:
+    mock_ctx = MagicMock()
+    mock_ctx.accinfo_query.return_value = (
+        0,
+        pd.DataFrame(
+            [
+                {
+                    "total_assets": 666.67,
+                    "power": 123.45,
+                    "available_funds": 200.0,
+                }
+            ]
+        ),
+    )
 
+    client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
+    from moomoo import TrdEnv
+    client.trade_context = mock_ctx
+    client.trd_env = TrdEnv.SIMULATE
+
+    assert client.get_account_value() == 666.67
+
+
+def test_paper_trade_client_account_value_falls_back_to_power() -> None:
+    mock_ctx = MagicMock()
+    mock_ctx.accinfo_query.return_value = (
+        0,
+        pd.DataFrame(
+            [
+                {
+                    "total_assets": 0.0,
+                    "power": 123.45,
+                    "available_funds": 200.0,
+                }
+            ]
+        ),
+    )
+
+    client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
+    from moomoo import TrdEnv
+    client.trade_context = mock_ctx
+    client.trd_env = TrdEnv.SIMULATE
+
+    assert client.get_account_value() == 123.45
+
+
+def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
     mock_ctx = MagicMock()
     mock_ctx.accinfo_query.return_value = (
         0,
@@ -418,3 +461,61 @@ def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
     client.trd_env = TrdEnv.SIMULATE
 
     assert client.get_buying_power() == 200.0
+
+
+def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None:
+    from moomoo import TrdEnv, TrdSide
+
+    from moomoo_bot.broker import paper as paper_module
+    from moomoo_bot.exceptions import OrderTimeoutError
+
+    mock_ctx = MagicMock()
+    mock_ctx.place_order.side_effect = RuntimeError("temporary opend failure")
+
+    client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
+    client.trade_context = mock_ctx
+    client.trd_env = TrdEnv.SIMULATE
+
+    monkeypatch.setattr(paper_module, "sleep", lambda _: None)
+
+    instruction = PaperOrderInstruction(
+        symbol="US.AAPL",
+        side=TrdSide.BUY,
+        quantity=1.0,
+        price=100.0,
+        reason="monthly_top_momentum:US.AAPL",
+    )
+
+    with pytest.raises(OrderTimeoutError, match="Order submission failed after 3 attempts"):
+        client.submit_order(instruction)
+
+    assert mock_ctx.place_order.call_count == 3
+
+
+def test_submit_order_does_not_retry_rejected_orders(monkeypatch) -> None:
+    from moomoo import TrdEnv, TrdSide
+
+    from moomoo_bot.broker import paper as paper_module
+    from moomoo_bot.exceptions import OrderRejectedError
+
+    mock_ctx = MagicMock()
+    mock_ctx.place_order.return_value = (1, "rejected by broker")
+
+    client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
+    client.trade_context = mock_ctx
+    client.trd_env = TrdEnv.SIMULATE
+
+    monkeypatch.setattr(paper_module, "sleep", lambda _: None)
+
+    instruction = PaperOrderInstruction(
+        symbol="US.AAPL",
+        side=TrdSide.BUY,
+        quantity=1.0,
+        price=100.0,
+        reason="monthly_top_momentum:US.AAPL",
+    )
+
+    with pytest.raises(OrderRejectedError, match="Failed to submit paper order"):
+        client.submit_order(instruction)
+
+    assert mock_ctx.place_order.call_count == 1

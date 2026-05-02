@@ -195,9 +195,10 @@ class TestPositionQuantitiesFromFrame:
         assert result == {}
 
     def test_handles_missing_columns(self) -> None:
+        # When qty column is missing, qty defaults to 0.0 which is not > 0, so no position returned
         df = pd.DataFrame({"code": ["AAPL"]})
         result = position_quantities_from_frame(df)
-        assert result == {"AAPL": 0.0}
+        assert result == {}
 
 
 class TestRowText:

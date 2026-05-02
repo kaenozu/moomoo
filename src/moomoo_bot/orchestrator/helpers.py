@@ -39,6 +39,21 @@ def round_order_price(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+def _extract_snapshot_prices(snapshot: pd.DataFrame) -> dict[str, float]:
+    extracted_prices: dict[str, float] = {}
+    for _, row in snapshot.iterrows():
+        code = str(row.get("code", "")).strip()
+        if not code:
+            continue
+        try:
+            last_price = float(row.get("last_price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if last_price > 0.0:
+            extracted_prices[code] = round_order_price(last_price)
+    return extracted_prices
+
+
 def resolve_order_prices(
     quote_client: MoomooOpenDClient,
     symbol_universe: list[str],
@@ -57,16 +72,7 @@ def resolve_order_prices(
         return fallback_prices
 
     order_prices = dict(fallback_prices)
-    for _, row in snapshot.iterrows():
-        code = str(row.get("code", "")).strip()
-        if not code:
-            continue
-        try:
-            last_price = float(row.get("last_price", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            continue
-        if last_price > 0.0:
-            order_prices[code] = round_order_price(last_price)
+    order_prices.update(_extract_snapshot_prices(snapshot))
     return order_prices
 
 
@@ -121,18 +127,7 @@ def snapshot_latest_prices(
     except Exception as exc:
         logger.warning("Snapshot fetch failed in snapshot_latest_prices: %s", exc)
         return {}
-    latest_prices: dict[str, float] = {}
-    for _, row in snapshot.iterrows():
-        code = str(row.get("code", "")).strip()
-        if not code:
-            continue
-        try:
-            last_price = float(row.get("last_price", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            continue
-        if last_price > 0.0:
-            latest_prices[code] = round_order_price(last_price)
-    return latest_prices
+    return _extract_snapshot_prices(snapshot)
 
 
 def kill_switch_message() -> str:

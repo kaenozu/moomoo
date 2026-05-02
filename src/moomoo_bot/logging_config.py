@@ -8,11 +8,6 @@ import logging
 import sys
 from pathlib import Path
 
-
-import logging
-import sys
-from pathlib import Path
-
 # python-json-logger がインストールされていることを前提とし、利用可能なら使用する
 try:
     from pythonjsonlogger import jsonlogger

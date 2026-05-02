@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from moomoo import TrdSide
 
-from moomoo_bot.exceptions import OrderRejectedError
+from moomoo_bot.exceptions import OrderRejectedError, OrderTimeoutError
 from moomoo_bot.row_utils import first_non_null_frame_value, normalize_side
 from moomoo_bot.state import OrderRecord
 
@@ -106,19 +106,43 @@ def _unsupported_order_reason(instruction) -> str | None:
 def _submit_single_order(
     *, trade_client, instruction, render_func, state_store, mode_label: str
 ) -> int:
+    pending_internal_id = None
+    if state_store is not None:
+        import uuid
+        pending_internal_id = f"internal_{uuid.uuid4().hex[:8]}"
+        pending_record = OrderRecord(
+            order_id=pending_internal_id,
+            symbol=instruction.symbol,
+            side=str(instruction.side),
+            quantity=float(instruction.quantity),
+            price=float(instruction.price),
+            status="submitting",
+            reason=instruction.reason,
+            filled_quantity=0.0
+        )
+        state_store.record_order(pending_record)
+
     try:
         response = trade_client.submit_order(instruction)
         render_func(instruction, response)
         if state_store is not None:
             order_record = _build_order_record(trade_client, instruction, response)
             if order_record is not None:
+                if pending_internal_id is not None and getattr(state_store, "update_order_id", None):
+                    state_store.update_order_id(pending_internal_id, str(order_record.order_id))
                 _persist_order_and_immediate_fill(
                     state_store,
                     order_record,
                     response,
+                    already_in_db=(pending_internal_id is not None),
                 )
         return 1
     except Exception as exc:
+        if state_store is not None and pending_internal_id is not None:
+            update_order_status = getattr(state_store, "update_order_status", None)
+            if callable(update_order_status):
+                update_order_status(pending_internal_id, "failed", 0.0)
+
         if isinstance(exc, OrderTimeoutError):
             logger.warning(
                 "Order timed out, checking for existing order",
@@ -165,57 +189,61 @@ def _is_rejected_order_error(exc: Exception) -> bool:
     )
 
 
-def _persist_order_and_immediate_fill(state_store, order_record, response) -> None:
+def _persist_order_and_immediate_fill(state_store, order_record, response, already_in_db: bool = False) -> None:
     update_order_status = getattr(state_store, "update_order_status", None)
     normalized_status = str(order_record.status or "").strip().lower().replace("-", "_")
     has_immediate_fill = float(order_record.filled_quantity or 0.0) > 0.0
 
-    if not callable(update_order_status) or not has_immediate_fill:
-        state_store.record_order(order_record)
+    if not callable(update_order_status):
+        if not already_in_db:
+            state_store.record_order(order_record)
         return
 
-    state_store.record_order(
-        OrderRecord(
-            order_id=order_record.order_id,
-            symbol=order_record.symbol,
-            side=order_record.side,
-            quantity=order_record.quantity,
-            price=order_record.price,
-            status="submitted",
-            reason=order_record.reason,
-            filled_quantity=0.0,
-            submitted_at=order_record.submitted_at,
+    if not already_in_db:
+        state_store.record_order(
+            OrderRecord(
+                order_id=order_record.order_id,
+                symbol=order_record.symbol,
+                side=order_record.side,
+                quantity=order_record.quantity,
+                price=order_record.price,
+                status="submitted",
+                reason=order_record.reason,
+                filled_quantity=0.0,
+                submitted_at=order_record.submitted_at,
+            )
         )
-    )
-    update_order_status(
-        str(order_record.order_id),
-        normalized_status,
-        float(order_record.filled_quantity or 0.0),
-        fill_price=_response_first_value(
-            response,
-            (
-                "avg_fill_price",
-                "avg_price",
-                "dealt_avg_price",
-                "deal_avg_price",
-                "fill_price",
-                "dealt_price",
-                "price",
+
+    if already_in_db or has_immediate_fill:
+        update_order_status(
+            str(order_record.order_id),
+            normalized_status,
+            float(order_record.filled_quantity or 0.0),
+            fill_price=_response_first_value(
+                response,
+                (
+                    "avg_fill_price",
+                    "avg_price",
+                    "dealt_avg_price",
+                    "deal_avg_price",
+                    "fill_price",
+                    "dealt_price",
+                    "price",
+                ),
             ),
-        ),
-        broker_accepted_price=_response_first_value(
-            response,
-            ("price", "order_price", "submitted_price"),
-        ),
-        fee_amount=_response_first_value(
-            response,
-            ("fee_amount", "total_fee", "fee", "commission", "transaction_fee"),
-        ),
-        filled_at=_response_first_value(
-            response,
-            ("updated_time", "updated_at", "create_time", "created_at", "fill_time"),
-        ),
-    )
+            broker_accepted_price=_response_first_value(
+                response,
+                ("price", "order_price", "submitted_price"),
+            ),
+            fee_amount=_response_first_value(
+                response,
+                ("fee_amount", "total_fee", "fee", "commission", "transaction_fee"),
+            ),
+            filled_at=_response_first_value(
+                response,
+                ("updated_time", "updated_at", "create_time", "created_at", "fill_time"),
+            ),
+        )
 
 
 def _build_order_record(trade_client, instruction, response):
