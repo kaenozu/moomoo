@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from math import isclose
 from pathlib import Path
 
 import pandas as pd
@@ -168,7 +169,7 @@ def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
     pending_qty = float(pending_order.quantity) if pending_order.quantity else None
     broker_qty = row_float(order_row, "quantity", "qty", "order_qty")
     if pending_qty is not None and broker_qty is not None:
-        return abs(pending_qty - broker_qty) < 1e-6
+        return isclose(pending_qty, broker_qty, rel_tol=1e-6, abs_tol=0.001)
 
     return False
 

@@ -263,7 +263,7 @@ def record_submitted_order_count(
     prepare_persistent_state_for_market_date(persistent_state, market_date)
 
     conn = getattr(state_store, "_connect", None)
-    write_lock = getattr(state_store, "_write_lock", None)
+    write_lock = getattr(state_store, "_lock", None)
     if callable(conn) and write_lock is not None:
         db_conn = conn()
         with write_lock:

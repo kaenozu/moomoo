@@ -37,8 +37,8 @@ def _build_position_frame_from_sim(sim) -> "pd.DataFrame":
 def _reset_local_sim_state_store(state_store) -> None:
     """Clear persisted local-sim risk/equity/order state when starting a fresh simulator."""
     conn_getter = getattr(state_store, "_connect", None)
-    write_lock = getattr(state_store, "_write_lock", None)
-    if not callable(conn_getter) or write_lock is None:
+    lock = getattr(state_store, "_lock", None)
+    if not callable(conn_getter) or lock is None:
         return
 
     db_conn = conn_getter()
@@ -52,12 +52,18 @@ def _reset_local_sim_state_store(state_store) -> None:
         "position_log",
     ]
 
-    with write_lock:
-        for table in tables:
-            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
-                raise ValueError(f"Invalid table name in reset: {table}")
-            db_conn.execute(f"DELETE FROM {table}")
-        db_conn.commit()
+    with lock:
+        try:
+            db_conn.execute("BEGIN IMMEDIATE")
+            for table in tables:
+                if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
+                    raise ValueError(f"Invalid table name in reset: {table}")
+                db_conn.execute(f"DELETE FROM {table}")
+            db_conn.commit()
+            db_conn.execute("VACUUM")
+        except Exception:
+            db_conn.rollback()
+            raise
 
 
 def _sync_orders_to_local_simulator(

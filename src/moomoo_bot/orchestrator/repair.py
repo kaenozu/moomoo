@@ -123,7 +123,7 @@ def _clear_state_files(state_store: StateStore) -> None:
         logger.warning("Backing up and clearing state data: %s", db_path)
     
     conn = state_store._connect()
-    with state_store._write_lock:
+    with state_store._lock:
         try:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")

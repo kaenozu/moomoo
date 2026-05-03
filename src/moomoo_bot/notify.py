@@ -8,20 +8,65 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from time import sleep
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
+from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS, DEFAULT_BASE_DELAY
+
 logger = logging.getLogger(__name__)
+
+# 允许的スキーム: https のみ (セキュリティ)
+_ALLOWED_SCHEMES = {"https"}
+# 危険なホストパターン: localhost, プライベートIP範囲等をブロック
+_FORBIDDEN_HOST_PATTERNS = [
+    re.compile(r'^localhost$', re.IGNORECASE),
+    re.compile(r'^127\.0\.0\.1$'),
+    re.compile(r'^10\.\d+\.\d+\.\d+$'),
+    re.compile(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$'),
+    re.compile(r'^192\.168\.\d+\.\d+$'),
+]
 
 
 def send_webhook(url: str, payload: dict) -> bool:
     """Send a JSON payload to a webhook URL. Returns True on success."""
     if not url:
         return False
-    if not url.startswith("https"):
+
+    # URL 構造检査
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
         logger.warning("Webhook URL must use HTTPS: %s", url)
         return False
+    if not parsed.netloc:
+        logger.warning("Webhook URL invalid (missing host): %s", url)
+        return False
+
+    # ローカル/プライベートホストのブロック
+    hostname = parsed.hostname or ""
+    for pattern in _FORBIDDEN_HOST_PATTERNS:
+        if pattern.match(hostname):
+            logger.warning("Webhook URL points to disallowed host %s: %s", hostname, url)
+            return False
+
+    try:
+        return _do_send_webhook(url, payload)
+    except Exception as exc:
+        logger.warning("Webhook delivery failed: %s", exc)
+        return False
+
+
+@with_retries(
+    max_retries=2,  # 3 attempts: 1 initial + 2 retries
+    base_delay=1.0,
+    backoff_factor=1.0,  # Fixed 1s delay
+    exceptions=(URLError, OSError, TimeoutError),
+    raise_on_failure=RuntimeError,
+)
+def _do_send_webhook(url: str, payload: dict) -> bool:
+    """Actual webhook send with retry. Returns True on 2xx response."""
     data = json.dumps(payload).encode("utf-8")
     req = Request(
         url,
@@ -29,19 +74,9 @@ def send_webhook(url: str, payload: dict) -> bool:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    for attempt in range(3):
-        try:
-            with urlopen(req, timeout=10) as resp:
-                return 200 <= resp.status < 300
-        except (URLError, OSError, TimeoutError) as exc:
-            if attempt < 2:
-                logger.debug(
-                    "Webhook attempt %d failed, retrying: %s", attempt + 1, exc
-                )
-                sleep(1.0)
-            else:
-                logger.warning("Webhook delivery failed after retries: %s", exc)
-    return False
+    with urlopen(req, timeout=10) as resp:
+        status = resp.status
+        return 200 <= status < 300
 
 
 def notify_rebalance(

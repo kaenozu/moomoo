@@ -5,11 +5,12 @@ Related: cli.py, risk.py.
 """
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,7 +66,7 @@ class Settings(BaseSettings):
     fallback_asset_symbol: str | None = None
     fallback_allocation: float = Field(default=0.0, ge=0.0, le=1.0)
     volatility_lookback_days: int = Field(default=21, ge=1)
-    fractional_share_precision: float = Field(default=1.0, gt=0.0)
+    fractional_share_precision: float = Field(default=1.0, ge=1.0)
     target_volatility_pct: float = Field(default=0.15, gt=0.0)
     max_volatility_percentile: float = Field(default=1.0, gt=0.0)
     relative_strength_lookback_days: int = Field(default=0, ge=0)
@@ -89,6 +90,25 @@ class Settings(BaseSettings):
     history_retry_delay_seconds: float = Field(default=0.5, gt=0.0)
     quote_retries: int = Field(default=3, ge=0)
     quote_retry_delay_seconds: float = Field(default=0.5, gt=0.0)
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols_format(cls, v: str) -> str:
+        if not v:
+            return v
+        # 既にカンマ区切り文字列。空の項目を除外
+        parts = [s.strip() for s in v.split(",") if s.strip()]
+        if not parts:
+            return v
+        # Moomoo US stocks は通常 "US.AAPL" 形式。大文字ALPHANUMERIC、ドット付き。
+        # より寛容に: 英大文字と数字とドットのみ、少なくとも1文字のドットを含む。
+        symbol_pattern = re.compile(r'^[A-Z0-9]+(?:\.[A-Z0-9]+)+$')
+        for sym in parts:
+            if not symbol_pattern.match(sym):
+                raise ValueError(
+                    f"Invalid symbol format: '{sym}'. Expected uppercase letters/digits separated by dots (e.g. 'US.AAPL')"
+                )
+        return v
 
     @property
     def symbol_list(self) -> list[str]:
