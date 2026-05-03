@@ -285,5 +285,8 @@ def test_submit_orders_treats_timeout_with_existing_order_as_success(tmp_path) -
 
         assert submitted_count == 1
         assert trade_client.submit_calls == 1
+        recent_order = state_store.load_recent_orders(limit=1)[0]
+        assert recent_order.order_id == "timeout-1"
+        assert recent_order.status == "submitted"
     finally:
         state_store.close()

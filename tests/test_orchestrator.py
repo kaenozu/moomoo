@@ -1031,6 +1031,80 @@ def test_run_one_shot_trade_closes_owned_clients_when_state_store_init_fails(
     assert trade_client.close_calls == 1
 
 
+def test_run_one_shot_trade_uses_orchestrator_monkeypatched_clients(monkeypatch) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "MoomooOpenDClient",
+        lambda host, port: quote_client,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "MoomooPaperTradeClient",
+        lambda host, port, trd_env: trade_client,
+    )
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        state_store=FakeStateStore(),
+    )
+
+    assert quote_client.fetch_price_panel_calls == 1
+    assert trade_client.submit_order_calls == 1
+
+
+def test_run_one_shot_trade_local_sim_preserves_original_exception(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    sim_path = tmp_path / "paper-sim-state.json"
+
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("price panel failed")
+
+    quote_client.fetch_price_panel = boom
+
+    with pytest.raises(RuntimeError, match="price panel failed"):
+        orchestrator.run_one_shot_trade(
+            settings=settings,
+            trade_env=TrdEnv.SIMULATE,
+            symbols=["US.AAPL"],
+            benchmark_symbol="US.VT",
+            history_days=2200,
+            capital=None,
+            fx_jpy_per_usd=None,
+            minimum_order_value=5.0,
+            quote_client=quote_client,
+            strategy=strategy,
+            state_store=FakeStateStore(),
+            use_local_sim=True,
+        )
+
+
 def test_reconcile_pending_orders_logs_type_error_and_returns_zero(
     monkeypatch, caplog
 ) -> None:

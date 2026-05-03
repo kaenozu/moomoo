@@ -129,10 +129,16 @@ class HealthCheckServer:
         def handler(*args, **kwargs):
             return HealthRequestHandler(*args, status_getter=self._get_status, **kwargs)
 
-        self.server = HTTPServer(("127.0.0.1", self.port), handler)
+        host = os.getenv("MOOMOO_BOT_HEALTH_HOST", "127.0.0.1")
+        if host == "0.0.0.0" and not _HEALTH_AUTH_TOKEN:
+            logger.warning(
+                "Health check server binding to 0.0.0.0 without Bearer token authentication. "
+                "Set MOOMOO_BOT_HEALTH_TOKEN to secure the endpoint."
+            )
+        self.server = HTTPServer((host, self.port), handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        logger.info("Health check server started on port %d", self.port)
+        logger.info("Health check server started on %s:%d", host, self.port)
 
     def stop(self):
         """Stop the health check server."""

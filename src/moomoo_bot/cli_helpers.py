@@ -7,6 +7,7 @@ Related: cli.py, order_submission.py, strategy/momentum.py.
 
 from pathlib import Path
 
+import logging
 import pandas as pd
 from moomoo import TrdEnv
 
@@ -21,6 +22,8 @@ from moomoo_bot.strategy.momentum import (
     MonthlyMomentumRotationConfig,
     MonthlyMomentumRotationStrategy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def parse_symbols(raw_symbols: str | None) -> list[str]:
@@ -48,6 +51,11 @@ def fetch_market_state(client: MoomooOpenDClient, benchmark_symbol: str) -> str:
     market_state_frame = client.fetch_market_state([benchmark_symbol])
     if market_state_frame.empty:
         raise RuntimeError(f"No market state returned for {benchmark_symbol}")
+    if len(market_state_frame) > 1:
+        logger.warning(
+            "Multiple market state rows returned for %s, using first",
+            benchmark_symbol,
+        )
     market_state = (
         str(market_state_frame.iloc[0].get("market_state", "")).strip().upper()
     )

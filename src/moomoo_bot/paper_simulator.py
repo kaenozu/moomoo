@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 import json
+import logging
 from pathlib import Path
 
 from moomoo_bot.row_utils import utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 
 _DEFAULT_SIM_DB = Path.home() / ".moomoo_bot" / "paper-sim-state.json"
@@ -70,7 +73,16 @@ class PaperSimulator:
         if not simulator.state_path.exists():
             return simulator
 
-        data = json.loads(simulator.state_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(simulator.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(
+                "Failed to load paper simulator state from %s: %s; starting fresh.",
+                simulator.state_path,
+                exc,
+            )
+            return simulator
+
         simulator.cash = float(data.get("cash", initial_cash))
         simulator.realized_pnl = float(data.get("realized_pnl", 0.0))
 

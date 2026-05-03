@@ -147,6 +147,8 @@ class _LedgerMixin:
         if normalized_side != "SELL":
             return
 
+        # FIFO lot consumption: ORDER BY opened_at, id ensures oldest lots are closed first.
+        # This matches typical tax lot accounting and US IRS specific identification rules.
         remaining_quantity = float(fill.fill_quantity)
         open_lots = conn.execute(
             """
