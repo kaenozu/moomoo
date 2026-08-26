@@ -31,18 +31,14 @@ def _build_position_frame_from_sim(sim) -> "pd.DataFrame":
         for pos in sim.positions.values()
         if pos.quantity > 0.0
     ]
-    return (
-        pd.DataFrame(rows)
-        if rows
-        else pd.DataFrame(columns=["code", "qty", "cost_price"])
-    )
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["code", "qty", "cost_price"])
 
 
 def _reset_local_sim_state_store(state_store) -> None:
     """Clear persisted local-sim risk/equity/order state when starting a fresh simulator."""
     conn_getter = getattr(state_store, "_connect", None)
-    lock = getattr(state_store, "_lock", None)
-    if not callable(conn_getter) or lock is None:
+    write_lock = getattr(state_store, "_write_lock", None)
+    if not callable(conn_getter) or write_lock is None:
         return
 
     db_conn = conn_getter()
@@ -56,24 +52,19 @@ def _reset_local_sim_state_store(state_store) -> None:
         "position_log",
     ]
 
-    with lock:
-        try:
-            db_conn.execute("BEGIN IMMEDIATE")
-            for table in tables:
-                if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
-                    raise ValueError(f"Invalid table name in reset: {table}")
-                db_conn.execute(f"DELETE FROM {table}")
-            db_conn.commit()
-            db_conn.execute("VACUUM")
-        except Exception:
-            db_conn.rollback()
-            raise
+    with write_lock:
+        for table in tables:
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
+                raise ValueError(f"Invalid table name in reset: {table}")
+            db_conn.execute(f"DELETE FROM {table}")
+        db_conn.commit()
 
 
 def _sync_orders_to_local_simulator(
     orders: list,
     prices: dict[str, float],
     local_sim_path: Path | None = None,
+    sim=None,
 ) -> int:
     """Write executed/planned orders into the local PaperSimulator so the Streamlit UI reflects them."""
     if not orders:
@@ -82,7 +73,10 @@ def _sync_orders_to_local_simulator(
         from moomoo_bot.paper_simulator import PaperSimulator
 
         local_sim_path = local_sim_path or _LOCAL_SIM_PATH
-        sim = PaperSimulator.load(state_path=local_sim_path, initial_cash=100_000.0)
+        simulator = sim or PaperSimulator.load(
+            state_path=local_sim_path,
+            initial_cash=100_000.0,
+        )
         applied_count = 0
         for order in orders:
             symbol = str(order.symbol)
@@ -90,13 +84,16 @@ def _sync_orders_to_local_simulator(
             qty = float(order.quantity)
             px = float(prices.get(symbol, order.price))
             if qty > 0.0:
-                sim.place_market_order(symbol=symbol, side=side, quantity=qty, price=px)
+                simulator.place_market_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=qty,
+                    price=px,
+                )
                 applied_count += 1
-        sim.mark_to_market(prices)
-        sim.save()
-        logger.info(
-            "Synced %d orders to local simulator (%s)", applied_count, local_sim_path
-        )
+        simulator.mark_to_market(prices)
+        simulator.save()
+        logger.info("Synced %d orders to local simulator (%s)", applied_count, local_sim_path)
         return applied_count
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to sync orders to local simulator: %s", exc)

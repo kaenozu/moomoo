@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from math import isclose
 from pathlib import Path
 
 import pandas as pd
@@ -26,11 +25,13 @@ from moomoo_bot.cli_helpers import (
 from moomoo_bot.cli_render import (
     console,
     render_order_response,
+    render_paper_plan,
     render_paper_trade_plan,
     render_risk_orders,
 )
 from moomoo_bot.money import convert_capital_to_usd
 from moomoo_bot.paper import (
+    PaperPlan,
     build_paper_rebalance_orders,
 )
 from moomoo_bot.risk import (
@@ -44,6 +45,7 @@ from moomoo_bot.orchestrator.helpers import (
     clear_expired_daily_loss_halt,
     daily_order_cap_reason,
     effective_max_position_weight,
+    is_daily_loss_halt,
     kill_switch_message,
     market_date_for_frame,
     overlay_latest_prices,
@@ -69,78 +71,6 @@ import moomoo_bot.orchestrator as _orch_module
 logger = logging.getLogger(__name__)
 
 
-def _load_local_simulator(
-    *,
-    local_sim_path: Path,
-    requested_paper_capital_usd: float,
-    capital: float | None,
-    state_store,
-):
-    from moomoo_bot.paper_simulator import PaperSimulator
-
-    local_sim = PaperSimulator.load(
-        state_path=local_sim_path,
-        initial_cash=requested_paper_capital_usd,
-    )
-    if capital is not None and not local_sim.positions and not local_sim.trades:
-        local_sim.reset(initial_cash=requested_paper_capital_usd)
-        _reset_local_sim_state_store(state_store)
-    console.print(
-        f"[local-sim mode] 現金残高: ${local_sim.cash:,.2f} USD、"
-        "注文はローカルシミュレーターに記録されます。"
-    )
-    return local_sim
-
-
-def _resolve_buying_power(
-    *,
-    trade_client,
-    requested_paper_capital_usd: float,
-) -> tuple[float | None, float]:
-    buying_power_getter = getattr(trade_client, "get_buying_power", None)
-    if not callable(buying_power_getter):
-        return None, requested_paper_capital_usd
-
-    try:
-        buying_power_usd = float(buying_power_getter())
-    except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
-        logger.warning("Failed to resolve paper buying power: %s", exc)
-        return None, requested_paper_capital_usd * 0.5
-
-    if buying_power_usd <= 0.0:
-        buying_power_usd = 0.0
-    paper_capital_usd = min(requested_paper_capital_usd, buying_power_usd)
-    if paper_capital_usd < requested_paper_capital_usd:
-        console.print(
-            "Paper sizing capital capped to available buying power: "
-            f"{paper_capital_usd:,.2f} USD"
-        )
-    return buying_power_usd, paper_capital_usd
-
-
-def _apply_local_sim_orders_if_needed(
-    *,
-    use_local_sim: bool,
-    orders,
-    latest_prices: dict[str, float],
-    local_sim_path: Path,
-) -> int:
-    if not use_local_sim:
-        return 0
-
-    orders_to_apply = list(orders)
-    if not orders_to_apply:
-        return 0
-
-    applied_orders = _sync_orders_to_local_simulator(
-        orders_to_apply,
-        latest_prices,
-        local_sim_path,
-    )
-    console.print(f"local-sim に {applied_orders} 件の注文を反映しました。")
-    return applied_orders
-
-
 def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
     from moomoo_bot.row_utils import row_text, row_float
 
@@ -149,9 +79,6 @@ def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
         if pending_order.order_id is not None
         else None
     )
-    if pending_order_id and pending_order_id.startswith("internal_"):
-        pending_order_id = None
-
     broker_order_id = row_text(order_row, "order_id", "orderid", "id")
     if pending_order_id and broker_order_id:
         return pending_order_id == broker_order_id
@@ -169,7 +96,7 @@ def broker_row_matches_order(order_row: pd.Series, pending_order) -> bool:
     pending_qty = float(pending_order.quantity) if pending_order.quantity else None
     broker_qty = row_float(order_row, "quantity", "qty", "order_qty")
     if pending_qty is not None and broker_qty is not None:
-        return isclose(pending_qty, broker_qty, rel_tol=1e-6, abs_tol=0.001)
+        return abs(pending_qty - broker_qty) < 1e-6
 
     return False
 
@@ -220,14 +147,6 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
                     order_id = str(pending_order.order_id).strip()
                 if not order_id:
                     continue
-
-                if pending_order.order_id and str(pending_order.order_id).startswith(
-                    "internal_"
-                ):
-                    update_order_id = getattr(state_store, "update_order_id", None)
-                    if callable(update_order_id):
-                        update_order_id(str(pending_order.order_id), order_id)
-                        pending_order.order_id = order_id
 
                 filled_quantity = row_float(
                     order_row,
@@ -384,12 +303,12 @@ def execute_trading_cycle(
     local_sim_path: Path | None = None,
     local_sim_state_db_path: Path | None = None,
 ) -> bool:
+    MoomooOpenDClient = _orch_module.MoomooOpenDClient
+    MoomooPaperTradeClient = _orch_module.MoomooPaperTradeClient
     StateStore = _orch_module.StateStore
 
     local_sim_path = local_sim_path or _LOCAL_SIM_PATH
     local_sim_state_db_path = local_sim_state_db_path or _LOCAL_SIM_STATE_DB_PATH
-    local_sim_applied_orders = 0
-    _local_sim = None
 
     selected_symbols = symbols
     benchmark_label = benchmark_symbol
@@ -419,344 +338,346 @@ def execute_trading_cycle(
 
     with ExitStack() as stack:
         if owns_quote_client:
-            quote_client = _orch_module.MoomooOpenDClient(
+            quote_client = MoomooOpenDClient(
                 host=settings.opend_host, port=settings.opend_port
             )
             stack.enter_context(quote_client)
         if owns_trade_client:
-            trade_client = _orch_module.MoomooPaperTradeClient(
+            trade_client = MoomooPaperTradeClient(
                 host=settings.opend_host, port=settings.opend_port, trd_env=trade_env
             )
             stack.enter_context(trade_client)
         if owns_state_store:
             state_store = StateStore(
-                db_path=local_sim_state_db_path
-                if use_local_sim
-                else settings.state_db_path,
+                db_path=local_sim_state_db_path if use_local_sim else settings.state_db_path,
                 execution_mode=settings.execution_mode,
             )
             stack.enter_context(state_store)
 
         paper_capital_usd = requested_paper_capital_usd
         buying_power_usd: float | None = None
+
+    if use_local_sim:
+        from moomoo_bot.paper_simulator import PaperSimulator
+        _local_sim = PaperSimulator.load(
+            state_path=local_sim_path,
+            initial_cash=requested_paper_capital_usd,
+        )
+        if capital is not None and not _local_sim.positions and not _local_sim.trades:
+            _local_sim.reset(initial_cash=requested_paper_capital_usd)
+            _reset_local_sim_state_store(state_store)
+        paper_capital_usd = _local_sim.cash
+        buying_power_usd = _local_sim.cash
+        submit_orders = False
+        console.print(
+            f"[local-sim mode] 現金残高: ${buying_power_usd:,.2f} USD、"
+            "注文はローカルシミュレーターに記録されます。"
+        )
+    else:
+        _local_sim = None
+
+    buying_power_getter = getattr(trade_client, "get_buying_power", None)
+    if not use_local_sim and callable(buying_power_getter):
         try:
-            if use_local_sim:
-                _local_sim = _load_local_simulator(
-                    local_sim_path=local_sim_path,
-                    requested_paper_capital_usd=requested_paper_capital_usd,
-                    capital=capital,
-                    state_store=state_store,
-                )
-                paper_capital_usd = _local_sim.cash
-                buying_power_usd = _local_sim.cash
-                submit_orders = False
-
-            buying_power_getter = getattr(trade_client, "get_buying_power", None)
-            if not use_local_sim:
-                buying_power_usd, paper_capital_usd = _resolve_buying_power(
-                    trade_client=trade_client,
-                    requested_paper_capital_usd=requested_paper_capital_usd,
-                )
-
-            strategy = strategy or _build_monthly_strategy(settings)
-            include_benchmark_in_prices = _requires_benchmark_prices(strategy)
-            preview_only_due_broker_lock = False
-
-            persistent_risk_state = state_store.load_risk_state()
-            risk_state = restore_risk_state(persistent_risk_state)
-            if (
-                not use_local_sim
-                and buying_power_usd is not None
-                and buying_power_usd <= 0.0
-            ):
-                logger.warning(
-                    "Paper account has no positive buying power; attempting repair."
-                )
+            buying_power_usd = float(buying_power_getter())
+        except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
+            logger.warning("Failed to resolve paper buying power: %s", exc)
+            requested_paper_capital_usd *= 0.5
+        else:
+            if buying_power_usd <= 0.0:
+                buying_power_usd = 0.0
+            paper_capital_usd = min(requested_paper_capital_usd, buying_power_usd)
+            if paper_capital_usd < requested_paper_capital_usd:
                 console.print(
-                    "Paper account has no positive buying power; attempting repair."
+                    "Paper sizing capital capped to available buying power: "
+                    f"{paper_capital_usd:,.2f} USD"
                 )
-                _orch_module.run_paper_repair(
-                    settings=settings,
-                    benchmark_symbol=benchmark_label,
-                    quote_client=quote_client,
-                    trade_client=trade_client,
-                    state_store=state_store,
-                    clear_local_state=True,
-                )
-                refreshed_buying_power_usd = 0.0
-                if callable(buying_power_getter):
-                    try:
-                        refreshed_buying_power_usd = float(buying_power_getter())
-                    except (
-                        ValueError,
-                        TypeError,
-                        ConnectionError,
-                        TimeoutError,
-                        RuntimeError,
-                    ) as exc:
-                        logger.warning(
-                            "Failed to refresh paper buying power after repair: %s", exc
-                        )
-                        refreshed_buying_power_usd = 0.0
+    strategy = strategy or _build_monthly_strategy(settings)
+    include_benchmark_in_prices = _requires_benchmark_prices(strategy)
+    preview_only_due_broker_lock = False
 
-                if refreshed_buying_power_usd > 0.0:
-                    buying_power_usd = refreshed_buying_power_usd
-                    paper_capital_usd = min(
-                        requested_paper_capital_usd, buying_power_usd
-                    )
-                else:
-                    submit_orders = False
-                    preview_only_due_broker_lock = True
-                    paper_capital_usd = requested_paper_capital_usd
+    try:
+        persistent_risk_state = state_store.load_risk_state()
+        risk_state = restore_risk_state(persistent_risk_state)
+        if not use_local_sim and buying_power_usd is not None and buying_power_usd <= 0.0:
+            logger.warning(
+                "Paper account has no positive buying power; attempting repair."
+            )
+            console.print(
+                "Paper account has no positive buying power; attempting repair."
+            )
+            _orch_module.run_paper_repair(
+                settings=settings,
+                benchmark_symbol=benchmark_label,
+                quote_client=quote_client,
+                trade_client=trade_client,
+                state_store=state_store,
+                clear_local_state=True,
+            )
+            refreshed_buying_power_usd = 0.0
+            if callable(buying_power_getter):
+                try:
+                    refreshed_buying_power_usd = float(buying_power_getter())
+                except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
                     logger.warning(
-                        "Paper buying power still unavailable after repair; continuing in preview-only mode."
+                        "Failed to refresh paper buying power after repair: %s", exc
                     )
-                    console.print(
-                        "Paper buying power is still unavailable after repair. "
-                        "Continuing in preview-only mode (no order submission)."
-                    )
+                    refreshed_buying_power_usd = 0.0
 
-            if use_local_sim:
-                assert _local_sim is not None
-                position_frame = _build_position_frame_from_sim(_local_sim)
-                current_positions = {
-                    sym: pos.quantity
-                    for sym, pos in _local_sim.positions.items()
-                    if pos.quantity > 0.0
-                }
+            if refreshed_buying_power_usd > 0.0:
+                buying_power_usd = refreshed_buying_power_usd
+                paper_capital_usd = min(requested_paper_capital_usd, buying_power_usd)
             else:
-                position_frame = trade_client.get_position_frame()
-                current_positions = _position_quantities(position_frame)
-
-            symbol_universe: list[str] = list(
-                dict.fromkeys(
-                    [
-                        *selected_symbols,
-                        *current_positions.keys(),
-                        *([benchmark_label] if include_benchmark_in_prices else []),
-                    ]
+                submit_orders = False
+                preview_only_due_broker_lock = True
+                paper_capital_usd = requested_paper_capital_usd
+                logger.warning(
+                    "Paper buying power still unavailable after repair; continuing in preview-only mode."
                 )
-            )
-            price_frame, benchmark_series = quote_client.fetch_price_panel(
-                symbol_universe,
-                benchmark_label,
-                history_days=history_days,
-                include_benchmark_in_prices=include_benchmark_in_prices,
-            )
-            historical_latest_prices = {
-                symbol: float(price_frame.iloc[-1][symbol])
-                for symbol in price_frame.columns
-            }
-            latest_prices = resolve_order_prices(
-                quote_client, symbol_universe, historical_latest_prices
-            )
-            order_price_frame = overlay_latest_prices(price_frame, latest_prices)
-            market_state = _fetch_market_state(quote_client, benchmark_label)
-            market_open = _is_regular_market_open(market_state)
-            if use_local_sim:
-                assert _local_sim is not None
-                account_value = _local_sim.mark_to_market(latest_prices).equity
-            elif capital is None:
-                account_value = trade_client.get_account_value()
-            else:
-                account_value = paper_capital_usd
-
-            market_date = market_date_for_frame(price_frame)
-            prepare_persistent_state_for_market_date(persistent_risk_state, market_date)
-            record_state_snapshot(
-                state_store,
-                account_value,
-                current_positions,
-                latest_prices,
-                market_date,
-            )
-            reconcile_pending_orders(state_store, trade_client)
-            cleanup_equity_history(state_store, settings.equity_retention_days)
-            clear_expired_daily_loss_halt(
-                risk_state, persistent_risk_state, market_date
-            )
-
-            if preview_only_due_broker_lock:
-                risk_halted = False
-                ev_should_reduce = False
                 console.print(
-                    "Preview-only broker-lock mode: skipping risk-stop enforcement and rendering plan only."
+                    "Paper buying power is still unavailable after repair. "
+                    "Continuing in preview-only mode (no order submission)."
                 )
-            else:
-                risk_halted, ev_should_reduce = _run_risk_checks(
-                    risk_state=risk_state,
-                    persistent_risk_state=persistent_risk_state,
-                    state_store=state_store,
-                    settings=settings,
-                    account_value=account_value,
-                    market_date=market_date,
-                    current_positions=current_positions,
-                    latest_prices=latest_prices,
-                    benchmark_series=benchmark_series,
-                    market_open=market_open,
-                    mode_label=mode_label,
-                    auto_mode=auto_mode,
-                    submit_orders=submit_orders,
-                    trade_client=trade_client,
-                    price_frame=price_frame,
-                    symbol_universe=symbol_universe,
-                    benchmark_label=benchmark_label,
-                    capital=capital,
-                )
-            if risk_halted:
-                return True
-
-            effective_max_weight = effective_max_position_weight(
-                max_position_weight or settings.max_single_position_weight, risk_state
+        if use_local_sim:
+            assert _local_sim is not None
+            position_frame = _build_position_frame_from_sim(_local_sim)
+            current_positions = {
+                sym: pos.quantity
+                for sym, pos in _local_sim.positions.items()
+                if pos.quantity > 0.0
+            }
+        else:
+            position_frame = trade_client.get_position_frame()
+            current_positions = _position_quantities(position_frame)
+        symbol_universe: list[str] = list(
+            dict.fromkeys(
+                [
+                    *selected_symbols,
+                    *current_positions.keys(),
+                    *([benchmark_label] if include_benchmark_in_prices else []),
+                ]
             )
-            if ev_should_reduce:
-                logger.info(
-                    "EV reduce: halving max position weight to %.2f",
-                    effective_max_weight * 0.5,
-                )
-                effective_max_weight = effective_max_weight * 0.5
+        )
+        price_frame, benchmark_series = quote_client.fetch_price_panel(
+            symbol_universe,
+            benchmark_label,
+            history_days=history_days,
+            include_benchmark_in_prices=include_benchmark_in_prices,
+        )
+        historical_latest_prices = {
+            symbol: float(price_frame.iloc[-1][symbol])
+            for symbol in price_frame.columns
+        }
+        latest_prices = resolve_order_prices(
+            quote_client, symbol_universe, historical_latest_prices
+        )
+        order_price_frame = overlay_latest_prices(price_frame, latest_prices)
+        market_state = _fetch_market_state(quote_client, benchmark_label)
+        market_open = _is_regular_market_open(market_state)
+        if use_local_sim:
+            assert _local_sim is not None
+            account_value = _local_sim.mark_to_market(latest_prices).equity
+        elif capital is None:
+            account_value = trade_client.get_account_value()
+        else:
+            account_value = paper_capital_usd
+        market_date = market_date_for_frame(price_frame)
+        prepare_persistent_state_for_market_date(persistent_risk_state, market_date)
+        record_state_snapshot(
+            state_store, account_value, current_positions, latest_prices, market_date
+        )
+        reconcile_pending_orders(state_store, trade_client)
+        cleanup_equity_history(state_store, settings.equity_retention_days)
+        clear_expired_daily_loss_halt(risk_state, persistent_risk_state, market_date)
 
-            decision = strategy.decide(price_frame, price_frame.index[-1])
-            plan = _orch_module.build_paper_plan(
-                order_price_frame,
-                decision,
-                account_value,
-                minimum_order_value=minimum_order_value,
-                max_position_weight=effective_max_weight,
-                fractional_share_precision=settings.fractional_share_precision,
+        if preview_only_due_broker_lock:
+            risk_halted = False
+            ev_should_reduce = False
+            console.print(
+                "Preview-only broker-lock mode: skipping risk-stop enforcement and rendering plan only."
             )
-            instructions = build_paper_rebalance_orders(
-                plan,
+        else:
+            risk_halted, ev_should_reduce = _run_risk_checks(
+                risk_state=risk_state,
+                persistent_risk_state=persistent_risk_state,
+                state_store=state_store,
+                settings=settings,
+                account_value=account_value,
+                market_date=market_date,
                 current_positions=current_positions,
                 latest_prices=latest_prices,
+                benchmark_series=benchmark_series,
                 market_open=market_open,
+                mode_label=mode_label,
+                auto_mode=auto_mode,
+                submit_orders=submit_orders,
+                trade_client=trade_client,
+                price_frame=price_frame,
+                symbol_universe=symbol_universe,
+                benchmark_label=benchmark_label,
+                capital=capital,
             )
-            risk_orders = build_stop_loss_take_profit_orders(
-                position_frame,
-                latest_prices,
-                settings.stop_loss_pct,
-                settings.take_profit_pct,
-                fractional_share_precision=settings.fractional_share_precision,
-            )
-            instructions = reprice_orders(instructions, latest_prices)
-            risk_orders = reprice_orders(risk_orders, latest_prices)
+        if risk_halted:
+            return True
 
-            render_paper_trade_plan(
-                plan,
-                benchmark_label,
-                ", ".join(str(s) for s in symbol_universe),
-                benchmark_series,
-                current_positions,
-                instructions,
+        effective_max_weight = effective_max_position_weight(
+            max_position_weight or settings.max_single_position_weight, risk_state
+        )
+        if ev_should_reduce:
+            logger.info(
+                "EV reduce: halving max position weight to %.2f",
+                effective_max_weight * 0.5,
             )
-            if capital is None:
-                console.print(
-                    f"Capital input: {account_value:,.2f} USD (from {mode_label} account)"
-                )
-            else:
-                console.print(
-                    f"Capital input: {capital:,.2f} {settings.capital_currency}"
-                )
-                console.print(f"Capital used for sizing: {account_value:,.2f} USD")
-            if not market_open:
-                console.print(
-                    f"Market state: {market_state}; buy orders will use ETH session."
-                )
+            effective_max_weight = effective_max_weight * 0.5
 
-            if submit_orders:
-                cap_reason = daily_order_cap_reason(
+        decision = strategy.decide(price_frame, price_frame.index[-1])
+        plan = _orch_module.build_paper_plan(
+            order_price_frame,
+            decision,
+            account_value,
+            minimum_order_value=minimum_order_value,
+            max_position_weight=effective_max_weight,
+            fractional_share_precision=settings.fractional_share_precision,
+        )
+        instructions = build_paper_rebalance_orders(
+            plan,
+            current_positions=current_positions,
+            latest_prices=latest_prices,
+            market_open=market_open,
+        )
+        risk_orders = build_stop_loss_take_profit_orders(
+            position_frame,
+            latest_prices,
+            settings.stop_loss_pct,
+            settings.take_profit_pct,
+            fractional_share_precision=settings.fractional_share_precision,
+        )
+        instructions = reprice_orders(instructions, latest_prices)
+        risk_orders = reprice_orders(risk_orders, latest_prices)
+
+        render_paper_trade_plan(
+            plan,
+            benchmark_label,
+            ", ".join(str(s) for s in symbol_universe),
+            benchmark_series,
+            current_positions,
+            instructions,
+        )
+        if capital is None:
+            console.print(
+                f"Capital input: {account_value:,.2f} USD (from {mode_label} account)"
+            )
+        else:
+            console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
+            console.print(f"Capital used for sizing: {account_value:,.2f} USD")
+        if not market_open:
+            console.print(
+                f"Market state: {market_state}; buy orders will use ETH session."
+            )
+
+        if submit_orders:
+            cap_reason = daily_order_cap_reason(
+                persistent_risk_state,
+                market_date,
+                len(risk_orders) + len(instructions),
+                settings.max_daily_orders,
+            )
+            if cap_reason is not None:
+                save_risk_state(
+                    state_store,
+                    risk_state,
                     persistent_risk_state,
                     market_date,
-                    len(risk_orders) + len(instructions),
-                    settings.max_daily_orders,
+                    account_value,
                 )
-                if cap_reason is not None:
-                    save_risk_state(
-                        state_store,
-                        risk_state,
-                        persistent_risk_state,
-                        market_date,
-                        account_value,
-                    )
-                    logger.warning(cap_reason)
-                    console.print(f"Order cap active: {cap_reason}")
-                    return True
+                logger.warning(cap_reason)
+                console.print(f"Order cap active: {cap_reason}")
+                return True
 
-            if risk_orders:
-                render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
-                if submit_orders:
-                    console.print(f"Submitting {mode_label} risk exit orders...")
-                    submitted_risk_orders = (
-                        _orch_module._submit_orders_with_duplicate_guard(
-                            trade_client,
-                            risk_orders,
-                            mode_label,
-                            render_order_response,
-                            state_store=state_store,
-                        )
-                    )
-                    record_submitted_order_count(
-                        state_store,
-                        risk_state,
-                        persistent_risk_state,
-                        market_date,
-                        account_value,
-                        submitted_risk_orders or 0,
-                    )
-
-            if instructions:
-                if submit_orders:
-                    console.print(f"Submitting {mode_label} orders...")
-                    submitted_orders = _orch_module._submit_orders_with_duplicate_guard(
+        if risk_orders:
+            render_risk_orders(risk_orders, current_positions, "Risk Exit Orders")
+            if submit_orders:
+                console.print(f"Submitting {mode_label} risk exit orders...")
+                submitted_risk_orders = (
+                    _orch_module._submit_orders_with_duplicate_guard(
                         trade_client,
-                        instructions,
+                        risk_orders,
                         mode_label,
                         render_order_response,
                         state_store=state_store,
                     )
-                    record_submitted_order_count(
-                        state_store,
-                        risk_state,
-                        persistent_risk_state,
-                        market_date,
-                        account_value,
-                        submitted_orders or 0,
-                    )
-                elif use_local_sim:
-                    local_sim_applied_orders = _apply_local_sim_orders_if_needed(
-                        use_local_sim=use_local_sim,
-                        orders=list(risk_orders) + list(instructions),
-                        latest_prices=latest_prices,
-                        local_sim_path=local_sim_path,
-                    )
-                else:
-                    console.print("paper-run preview only; no orders submitted.")
-            elif not risk_orders:
-                console.print("No paper orders were required.")
-
-            if use_local_sim and not instructions and risk_orders:
-                local_sim_applied_orders = _apply_local_sim_orders_if_needed(
-                    use_local_sim=use_local_sim,
-                    orders=risk_orders,
-                    latest_prices=latest_prices,
-                    local_sim_path=local_sim_path,
                 )
-            elif not use_local_sim:
+                record_submitted_order_count(
+                    state_store,
+                    risk_state,
+                    persistent_risk_state,
+                    market_date,
+                    account_value,
+                    submitted_risk_orders or 0,
+                )
+
+        local_sim_applied_orders = 0
+        if instructions:
+            if submit_orders:
+                console.print(f"Submitting {mode_label} orders...")
+                submitted_orders = _orch_module._submit_orders_with_duplicate_guard(
+                    trade_client,
+                    instructions,
+                    mode_label,
+                    render_order_response,
+                    state_store=state_store,
+                )
+                record_submitted_order_count(
+                    state_store,
+                    risk_state,
+                    persistent_risk_state,
+                    market_date,
+                    account_value,
+                    submitted_orders or 0,
+                )
+            elif use_local_sim:
+                assert _local_sim is not None
                 all_cycle_orders = list(risk_orders) + list(instructions)
-                _sync_orders_to_local_simulator(
-                    all_cycle_orders, latest_prices, local_sim_path
+                local_sim_applied_orders = _sync_orders_to_local_simulator(
+                    all_cycle_orders,
+                    latest_prices,
+                    local_sim_path,
+                    sim=_local_sim,
                 )
+                console.print(
+                    f"local-sim に {local_sim_applied_orders} 件の注文を反映しました。"
+                )
+            else:
+                console.print("paper-run preview only; no orders submitted.")
+        elif not risk_orders:
+            console.print("No paper orders were required.")
 
-            return True
-        finally:
-            if (
-                use_local_sim
-                and _local_sim is not None
-                and local_sim_applied_orders == 0
-            ):
-                try:
-                    # When orders were synced through a freshly loaded simulator instance,
-                    # saving the stale pre-sync object here would clobber persisted positions.
-                    _local_sim.save()
-                except Exception as exc:
-                    logger.warning("Failed to save local simulator state: %s", exc)
+        if use_local_sim and not instructions and risk_orders:
+            assert _local_sim is not None
+            local_sim_applied_orders = _sync_orders_to_local_simulator(
+                list(risk_orders),
+                latest_prices,
+                local_sim_path,
+                sim=_local_sim,
+            )
+            console.print(
+                f"local-sim に {local_sim_applied_orders} 件の注文を反映しました。"
+            )
+        elif not use_local_sim:
+            all_cycle_orders = list(risk_orders) + list(instructions)
+            _sync_orders_to_local_simulator(all_cycle_orders, latest_prices, local_sim_path)
+
+        return True
+
+    finally:
+        if use_local_sim and _local_sim is not None:
+            try:
+                _local_sim.save()
+            except Exception as exc:
+                logger.warning("Failed to save local simulator state: %s", exc)
+        if owns_state_store:
+            state_store.close()
+        if owns_trade_client:
+            trade_client.close()
+        if owns_quote_client:
+            quote_client.close()

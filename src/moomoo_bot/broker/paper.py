@@ -253,12 +253,12 @@ def _normalize_order_bool(value: object) -> bool:
     return normalized in {"TRUE", "1", "YES", "Y"}
 
 
-def _positive_float(value: object) -> float | None:
+def _positive_float(value: str | int | float | None) -> float | None:
     normalized_text = _normalize_text(value).upper()
     if normalized_text in {"", "N/A", "NONE", "NAN"}:
         return None
     try:
-        numeric = float(value)
+        numeric = float(normalized_text)
     except (TypeError, ValueError):
         return None
     if numeric <= 0.0:
@@ -267,7 +267,7 @@ def _positive_float(value: object) -> float | None:
 
 
 def _quantity_matches(order_qty: object, instruction_qty: float) -> bool:
-    broker_qty = float(order_qty or 0.0)
+    broker_qty = float(_normalize_text(order_qty) or 0.0)
     requested_qty = float(instruction_qty or 0.0)
     if isclose(broker_qty, requested_qty, rel_tol=1e-6, abs_tol=0.001):
         return True

@@ -75,6 +75,7 @@ def run_auto_monitor(
             db_path=settings.state_db_path,
             execution_mode=settings.execution_mode,
         )
+    assert state_store is not None
 
     if _is_kill_switch_active():
         message = kill_switch_message()
@@ -229,4 +230,5 @@ def run_auto_monitor(
         if health_server is not None:
             health_server.stop()
         if owns_state_store:
+            assert state_store is not None
             state_store.close()

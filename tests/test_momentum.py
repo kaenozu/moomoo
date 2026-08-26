@@ -166,3 +166,21 @@ def test_core_satellite_strategy_blends_active_sleeve_with_benchmark() -> None:
 
     strategy.reset()
     assert active_strategy.reset_calls == 1
+
+
+def test_core_satellite_strategy_delegates_attributes_and_tolerates_missing_reset() -> None:
+    class ActiveStrategy:
+        def __init__(self) -> None:
+            self.config = {"name": "demo"}
+
+        def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp):
+            return TradeDecision(as_of=as_of, target_weights={}, reason="idle")
+
+    strategy = CoreSatelliteStrategy(
+        ActiveStrategy(),
+        benchmark_symbol="US.VT",
+        satellite_weight=0.5,
+    )
+
+    assert strategy.config == {"name": "demo"}
+    strategy.reset()

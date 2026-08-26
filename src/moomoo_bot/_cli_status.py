@@ -135,7 +135,10 @@ def performance(
 
     _cli = cli_module()
     settings = _cli.get_settings()
-    state_path = _cli.resolve_state_db_path(settings)
+    state_path = _cli.resolve_state_db_path(
+        db_path=settings.state_db_path,
+        execution_mode=settings.execution_mode,
+    )
     state_store = _cli.StateStore(state_path)
     try:
         realizations = state_store.get_recent_realizations(lookback_trades)

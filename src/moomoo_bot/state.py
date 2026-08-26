@@ -172,7 +172,7 @@ class StateStore(_QueryMixin, _LedgerMixin):
 
     # --- Orders ---
 
-    def record_order(self, record: OrderRecord) -> int:
+    def record_order(self, record: OrderRecord) -> int | None:
         conn = self._connect()
         normalized_status = _normalize_order_status(record.status) or "submitted"
         filled_at = record.filled_at

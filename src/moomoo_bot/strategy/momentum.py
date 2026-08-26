@@ -125,7 +125,7 @@ class MonthlyMomentumRotationStrategy:
             selected_symbols = eligible.head(self.config.top_n).index.tolist()
 
             if not selected_symbols:
-                preserved: dict[str, float] = {}
+                preserved = {}
                 if self.config.min_hold_days > 0:
                     for symbol, weight in self._current_weights.items():
                         entry_index = self._entry_index.get(symbol)
@@ -135,6 +135,7 @@ class MonthlyMomentumRotationStrategy:
                         ):
                             preserved[symbol] = weight
 
+                # Phase 2: Fallback Asset
                 fallback_weights: dict[str, float] = {}
                 if (
                     self.config.fallback_asset_symbol
@@ -142,12 +143,10 @@ class MonthlyMomentumRotationStrategy:
                 ):
                     remaining_weight = max(0.0, 1.0 - sum(preserved.values()))
                     if remaining_weight > 0.0:
-                        fallback_share = min(
+                        fb_share = min(
                             remaining_weight, self.config.fallback_allocation
                         )
-                        fallback_weights[self.config.fallback_asset_symbol] = (
-                            fallback_share
-                        )
+                        fallback_weights[self.config.fallback_asset_symbol] = fb_share
 
                 self._current_weights = {**preserved, **fallback_weights}
                 self._entry_index = {
@@ -175,26 +174,24 @@ class MonthlyMomentumRotationStrategy:
                 ]
                 new_weights: dict[str, float] = {}
                 if new_symbols and remaining_weight > 0.0:
+                    # Phase 3: Inverse Volatility Weighting
                     if self.config.inverse_volatility:
                         vols: dict[str, float] = {}
-                        for symbol in new_symbols:
+                        for sym in new_symbols:
                             returns = (
-                                frame[symbol]
+                                frame[sym]
                                 .tail(self.config.volatility_lookback_days)
                                 .pct_change()
                                 .dropna()
                             )
                             vol = returns.std()
-                            vols[symbol] = vol if vol > 0 else 1.0
+                            vols[sym] = vol if vol > 0 else 1.0
 
-                        inverse_vols = {
-                            symbol: 1.0 / vol for symbol, vol in vols.items()
-                        }
-                        total_inverse_vol = sum(inverse_vols.values())
+                        inv_vols = {sym: 1.0 / v for sym, v in vols.items()}
+                        total_inv_vol = sum(inv_vols.values())
                         new_weights = {
-                            symbol: (inverse_vols[symbol] / total_inverse_vol)
-                            * remaining_weight
-                            for symbol in new_symbols
+                            sym: (inv_vols[sym] / total_inv_vol) * remaining_weight
+                            for sym in new_symbols
                         }
                     else:
                         share = remaining_weight / len(new_symbols)
@@ -218,7 +215,6 @@ class MonthlyMomentumRotationStrategy:
             as_of=as_of, target_weights=self._current_weights, reason=reason
         )
 
-
 class CoreSatelliteStrategy:
     """Blend an active strategy sleeve with a benchmark core sleeve."""
 
@@ -238,12 +234,13 @@ class CoreSatelliteStrategy:
     def requires_benchmark_prices(self) -> bool:
         return self.satellite_weight < 1.0
 
-    @property
-    def config(self):
-        return self.strategy.config
-
     def reset(self) -> None:
-        self.strategy.reset()
+        reset_strategy = getattr(self.strategy, "reset", None)
+        if callable(reset_strategy):
+            reset_strategy()
+
+    def __getattr__(self, name: str):
+        return getattr(self.strategy, name)
 
     def decide(self, prices: pd.DataFrame, as_of: pd.Timestamp) -> TradeDecision:
         active_prices = prices.drop(columns=[self.benchmark_symbol], errors="ignore")
@@ -267,6 +264,7 @@ class CoreSatelliteStrategy:
             target_weights=active_weights,
             reason=f"{decision.reason}:core_satellite={self.satellite_weight:.0%}/{(1.0 - self.satellite_weight):.0%}",
         )
+
 
 
 class DynamicCoreSatelliteStrategy(CoreSatelliteStrategy):
