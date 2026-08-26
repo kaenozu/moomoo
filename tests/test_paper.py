@@ -31,7 +31,10 @@ def test_build_paper_plan_sizes_fractional_orders_and_skips_small_allocations() 
 
     plan = build_paper_plan(prices, decision, capital=1000.0, minimum_order_value=5.0)
 
-    assert [allocation.symbol for allocation in plan.allocations] == ["US.AAPL", "US.MSFT"]
+    assert [allocation.symbol for allocation in plan.allocations] == [
+        "US.AAPL",
+        "US.MSFT",
+    ]
     assert plan.allocations[0].target_quantity == 6.0
     assert plan.allocations[0].target_cost == 600.0
     assert plan.allocations[1].target_quantity == 1.995
@@ -55,7 +58,11 @@ def test_build_paper_plan_rejects_non_positive_capital() -> None:
 def test_build_paper_plan_caps_single_position_when_requested() -> None:
     index = pd.date_range("2025-01-01", periods=3, freq="B")
     prices = pd.DataFrame({"US.AAPL": [100.0, 101.0, 100.0]}, index=index)
-    decision = TradeDecision(as_of=index[-1], target_weights={"US.AAPL": 1.0}, reason="monthly_top_momentum:US.AAPL")
+    decision = TradeDecision(
+        as_of=index[-1],
+        target_weights={"US.AAPL": 1.0},
+        reason="monthly_top_momentum:US.AAPL",
+    )
 
     plan = build_paper_plan(prices, decision, capital=1000.0, max_position_weight=0.35)
 
@@ -86,8 +93,16 @@ def test_build_paper_rebalance_orders_sells_excess_and_buys_missing_positions() 
         latest_prices={"US.AAPL": 100.0, "US.MSFT": 200.0, "US.TSLA": 150.0},
     )
 
-    assert [instruction.side for instruction in instructions] == [TrdSide.SELL, TrdSide.SELL, TrdSide.BUY]
-    assert [instruction.symbol for instruction in instructions] == ["US.TSLA", "US.AAPL", "US.MSFT"]
+    assert [instruction.side for instruction in instructions] == [
+        TrdSide.SELL,
+        TrdSide.SELL,
+        TrdSide.BUY,
+    ]
+    assert [instruction.symbol for instruction in instructions] == [
+        "US.TSLA",
+        "US.AAPL",
+        "US.MSFT",
+    ]
     assert instructions[0].quantity == 2.0
     assert instructions[1].quantity == 2.0
     assert instructions[2].quantity == pytest.approx(2.5)
@@ -116,7 +131,10 @@ def test_build_paper_rebalance_orders_preserves_fractional_share_deltas() -> Non
     )
 
     assert [instruction.symbol for instruction in instructions] == ["US.TSLA", "US.AMD"]
-    assert [instruction.side for instruction in instructions] == [TrdSide.SELL, TrdSide.BUY]
+    assert [instruction.side for instruction in instructions] == [
+        TrdSide.SELL,
+        TrdSide.BUY,
+    ]
     assert [instruction.quantity for instruction in instructions] == [
         1.5,
         pytest.approx(0.343),
@@ -166,8 +184,14 @@ def test_build_paper_rebalance_orders_keeps_fractional_buy_orders() -> None:
         latest_prices={"US.AMD": 284.49, "US.GOOGL": 332.29},
     )
 
-    assert [instruction.symbol for instruction in instructions] == ["US.AMD", "US.GOOGL"]
-    assert [instruction.side for instruction in instructions] == [TrdSide.BUY, TrdSide.BUY]
+    assert [instruction.symbol for instruction in instructions] == [
+        "US.AMD",
+        "US.GOOGL",
+    ]
+    assert [instruction.side for instruction in instructions] == [
+        TrdSide.BUY,
+        TrdSide.BUY,
+    ]
     assert [instruction.quantity for instruction in instructions] == [
         pytest.approx(0.527),
         pytest.approx(0.451),
@@ -224,8 +248,15 @@ def test_build_paper_rebalance_orders_uses_eth_session_when_market_closed() -> N
 def test_get_matching_active_order_returns_only_active_orders() -> None:
     instruction = build_paper_rebalance_orders(
         build_paper_plan(
-            pd.DataFrame({"US.AAPL": [100.0, 101.0, 102.0]}, index=pd.date_range("2025-01-01", periods=3, freq="B")),
-            TradeDecision(as_of=pd.Timestamp("2025-01-03"), target_weights={"US.AAPL": 1.0}, reason="monthly_top_momentum:US.AAPL"),
+            pd.DataFrame(
+                {"US.AAPL": [100.0, 101.0, 102.0]},
+                index=pd.date_range("2025-01-01", periods=3, freq="B"),
+            ),
+            TradeDecision(
+                as_of=pd.Timestamp("2025-01-03"),
+                target_weights={"US.AAPL": 1.0},
+                reason="monthly_top_momentum:US.AAPL",
+            ),
             capital=102_000.0,
         )
     )[0]
@@ -332,7 +363,10 @@ class FakeTradeContext:
 
 # --- Domain exception tests for MoomooPaperTradeClient ---
 
-def test_paper_trade_client_raises_broker_connection_error_when_context_is_none() -> None:
+
+def test_paper_trade_client_raises_broker_connection_error_when_context_is_none() -> (
+    None
+):
     from moomoo_bot.exceptions import BrokerConnectionError
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
@@ -343,9 +377,13 @@ def test_paper_trade_client_raises_broker_connection_error_when_context_is_none(
         try:
             getattr(client, method_name)()
         except BrokerConnectionError as exc:
-            assert "not initialized" in str(exc).lower(), f"{method_name} error message wrong: {exc}"
+            assert "not initialized" in str(exc).lower(), (
+                f"{method_name} error message wrong: {exc}"
+            )
         except Exception as exc:
-            raise AssertionError(f"{method_name} raised unexpected {type(exc).__name__}: {exc}")
+            raise AssertionError(
+                f"{method_name} raised unexpected {type(exc).__name__}: {exc}"
+            )
         else:
             raise AssertionError(f"{method_name} did not raise BrokerConnectionError")
 
@@ -361,6 +399,7 @@ def test_paper_trade_client_raises_broker_connection_error_on_api_failure() -> N
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     from moomoo import TrdEnv
+
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
@@ -368,9 +407,13 @@ def test_paper_trade_client_raises_broker_connection_error_on_api_failure() -> N
         try:
             getattr(client, method_name)()
         except BrokerConnectionError as exc:
-            assert "failed to fetch" in str(exc).lower(), f"{method_name} error message wrong: {exc}"
+            assert "failed to fetch" in str(exc).lower(), (
+                f"{method_name} error message wrong: {exc}"
+            )
         except Exception as exc:
-            raise AssertionError(f"{method_name} raised unexpected {type(exc).__name__}: {exc}")
+            raise AssertionError(
+                f"{method_name} raised unexpected {type(exc).__name__}: {exc}"
+            )
         else:
             raise AssertionError(f"{method_name} did not raise BrokerConnectionError")
 
@@ -383,6 +426,7 @@ def test_paper_trade_client_raises_data_error_for_empty_account_info() -> None:
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     from moomoo import TrdEnv
+
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
@@ -411,6 +455,7 @@ def test_paper_trade_client_account_value_prefers_total_assets() -> None:
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     from moomoo import TrdEnv
+
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
@@ -434,6 +479,7 @@ def test_paper_trade_client_account_value_falls_back_to_power() -> None:
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     from moomoo import TrdEnv
+
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
@@ -457,6 +503,7 @@ def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     from moomoo import TrdEnv
+
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
@@ -466,7 +513,7 @@ def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
 def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None:
     from moomoo import TrdEnv, TrdSide
 
-    from moomoo_bot.broker import paper as paper_module
+    from moomoo_bot import retry as retry_module
     from moomoo_bot.exceptions import OrderTimeoutError
 
     mock_ctx = MagicMock()
@@ -476,7 +523,7 @@ def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
-    monkeypatch.setattr(paper_module, "sleep", lambda _: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _: None)
 
     instruction = PaperOrderInstruction(
         symbol="US.AAPL",
@@ -486,7 +533,10 @@ def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None
         reason="monthly_top_momentum:US.AAPL",
     )
 
-    with pytest.raises(OrderTimeoutError, match="Order submission failed after 3 attempts"):
+    with pytest.raises(
+        OrderTimeoutError,
+        match="_submit_order_with_retry failed after 3 attempts",
+    ):
         client.submit_order(instruction)
 
     assert mock_ctx.place_order.call_count == 3
@@ -495,7 +545,7 @@ def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None
 def test_submit_order_does_not_retry_rejected_orders(monkeypatch) -> None:
     from moomoo import TrdEnv, TrdSide
 
-    from moomoo_bot.broker import paper as paper_module
+    from moomoo_bot import retry as retry_module
     from moomoo_bot.exceptions import OrderRejectedError
 
     mock_ctx = MagicMock()
@@ -505,7 +555,7 @@ def test_submit_order_does_not_retry_rejected_orders(monkeypatch) -> None:
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
 
-    monkeypatch.setattr(paper_module, "sleep", lambda _: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _: None)
 
     instruction = PaperOrderInstruction(
         symbol="US.AAPL",

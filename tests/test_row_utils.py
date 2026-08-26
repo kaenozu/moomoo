@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
 
 import pandas as pd
-import pytest
 
 from moomoo_bot.row_utils import (
     utc_now_iso,
@@ -21,7 +19,7 @@ from moomoo_bot.row_utils import (
 
 class TestUtcNowIso:
     """Tests for utc_now_iso function."""
-    
+
     def test_utc_now_iso_returns_string(self) -> None:
         """Test that utc_now_iso returns a string."""
         result = utc_now_iso()
@@ -31,7 +29,7 @@ class TestUtcNowIso:
         """Test that output is ISO-8601 format."""
         result = utc_now_iso()
         # ISO-8601 format: 2026-05-01T10:00:00.000000+00:00
-        iso_pattern = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}'
+        iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
         assert re.match(iso_pattern, result)
 
     def test_utc_now_iso_contains_utc_offset(self) -> None:
@@ -50,7 +48,7 @@ class TestUtcNowIso:
 
 class TestNormalizeSide:
     """Tests for normalize_side function."""
-    
+
     def test_normalize_buy_lowercase(self) -> None:
         assert normalize_side("buy") == "BUY"
 
@@ -92,7 +90,7 @@ class TestNormalizeSide:
 
 class TestFirstNonNullRowValue:
     """Tests for first_non_null_row_value function."""
-    
+
     def test_returns_first_non_null(self) -> None:
         row = pd.Series({"a": None, "b": "value", "c": "other"})
         result = first_non_null_row_value(row, ("a", "b", "c"))
@@ -133,7 +131,7 @@ class TestFirstNonNullRowValue:
 
 class TestFirstNonNullFrameValue:
     """Tests for first_non_null_frame_value function."""
-    
+
     def test_returns_first_row_first_value(self) -> None:
         df = pd.DataFrame({"a": [None, 2], "b": ["value", "other"]})
         result = first_non_null_frame_value(df, ("a", "b"))
@@ -155,37 +153,45 @@ class TestFirstNonNullFrameValue:
 
 class TestPositionQuantitiesFromFrame:
     """Tests for position_quantities_from_frame function."""
-    
+
     def test_basic_positions(self) -> None:
-        df = pd.DataFrame({
-            "code": ["AAPL", "MSFT", "GOOGL"],
-            "qty": [100.0, 50.5, 25.25],
-        })
+        df = pd.DataFrame(
+            {
+                "code": ["AAPL", "MSFT", "GOOGL"],
+                "qty": [100.0, 50.5, 25.25],
+            }
+        )
         result = position_quantities_from_frame(df)
         assert result == {"AAPL": 100.0, "MSFT": 50.5, "GOOGL": 25.25}
 
     def test_ignores_zero_quantities(self) -> None:
-        df = pd.DataFrame({
-            "code": ["AAPL", "MSFT", "GOOGL"],
-            "qty": [100.0, 0.0, 25.0],
-        })
+        df = pd.DataFrame(
+            {
+                "code": ["AAPL", "MSFT", "GOOGL"],
+                "qty": [100.0, 0.0, 25.0],
+            }
+        )
         result = position_quantities_from_frame(df)
         assert result == {"AAPL": 100.0, "GOOGL": 25.0}
         assert "MSFT" not in result
 
     def test_ignores_negative_quantities(self) -> None:
-        df = pd.DataFrame({
-            "code": ["AAPL", "MSFT"],
-            "qty": [100.0, -50.0],
-        })
+        df = pd.DataFrame(
+            {
+                "code": ["AAPL", "MSFT"],
+                "qty": [100.0, -50.0],
+            }
+        )
         result = position_quantities_from_frame(df)
         assert result == {"AAPL": 100.0}
 
     def test_ignores_missing_code(self) -> None:
-        df = pd.DataFrame({
-            "code": ["AAPL", "", "GOOGL"],
-            "qty": [100.0, 50.0, 25.0],
-        })
+        df = pd.DataFrame(
+            {
+                "code": ["AAPL", "", "GOOGL"],
+                "qty": [100.0, 50.0, 25.0],
+            }
+        )
         result = position_quantities_from_frame(df)
         assert result == {"AAPL": 100.0, "GOOGL": 25.0}
 
@@ -203,7 +209,7 @@ class TestPositionQuantitiesFromFrame:
 
 class TestRowText:
     """Tests for row_text function."""
-    
+
     def test_returns_first_non_empty(self) -> None:
         row = pd.Series({"a": "", "b": "value", "c": "other"})
         result = row_text(row, "a", "b", "c")
@@ -237,7 +243,7 @@ class TestRowText:
 
 class TestRowFloat:
     """Tests for row_float function."""
-    
+
     def test_returns_first_float(self) -> None:
         row = pd.Series({"a": None, "b": 3.14, "c": 2.71})
         result = row_float(row, "a", "b", "c")

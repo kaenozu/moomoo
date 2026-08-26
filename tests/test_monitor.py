@@ -1,18 +1,19 @@
 """Tests for orchestrator/monitor.py - run_auto_monitor additional edge cases."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 import pandas as pd
-import pytest
 
 from moomoo_bot.config import Settings
-from moomoo_bot.state import EquitySnapshot, OrderRecord, PersistentRiskState
+from moomoo_bot.state import EquitySnapshot, PersistentRiskState
 
 
 # ---------------------------------------------------------------------------
 # Minimal fakes (copied from test_orchestrator pattern)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FakeQuoteClient:
@@ -34,10 +35,14 @@ class FakeQuoteClient:
         return price_frame, benchmark
 
     def fetch_market_state(self, code_list):
-        return pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
+        return pd.DataFrame(
+            {"code": list(code_list), "market_state": ["MORNING"] * len(code_list)}
+        )
 
     def fetch_market_snapshot(self, code_list):
-        return pd.DataFrame({"code": list(code_list), "last_price": [100.0] * len(code_list)})
+        return pd.DataFrame(
+            {"code": list(code_list), "last_price": [100.0] * len(code_list)}
+        )
 
     def close(self) -> None:
         return None
@@ -58,10 +63,18 @@ class FakeTradeClient:
         default_factory=lambda: pd.DataFrame({"code": [], "qty": []})
     )
     order_frame: pd.DataFrame = field(
-        default_factory=lambda: pd.DataFrame({
-            "order_id": [], "order_status": [], "code": [],
-            "trd_side": [], "qty": [], "price": [], "filled_quantity": [], "remark": []
-        })
+        default_factory=lambda: pd.DataFrame(
+            {
+                "order_id": [],
+                "order_status": [],
+                "code": [],
+                "trd_side": [],
+                "qty": [],
+                "price": [],
+                "filled_quantity": [],
+                "remark": [],
+            }
+        )
     )
 
     def get_position_frame(self):
@@ -74,14 +87,18 @@ class FakeTradeClient:
         return self.account_value
 
     def get_buying_power(self) -> float:
-        return self.buying_power if self.buying_power is not None else self.account_value
+        return (
+            self.buying_power if self.buying_power is not None else self.account_value
+        )
 
     def get_matching_active_order(self, instruction, refresh_cache: bool = True):
         return None
 
     def submit_order(self, instruction):
         self.submit_order_calls += 1
-        return pd.DataFrame({"order_id": [self.submit_order_calls], "order_status": ["FILLED"]})
+        return pd.DataFrame(
+            {"order_id": [self.submit_order_calls], "order_status": ["FILLED"]}
+        )
 
     def close(self) -> None:
         return None
@@ -99,6 +116,7 @@ class FakeStrategy:
 
     def decide(self, prices, as_of):
         from moomoo_bot.strategy.base import TradeDecision
+
         self.decide_calls += 1
         return TradeDecision(
             as_of=as_of,
@@ -133,7 +151,9 @@ class FakeStateStore:
         self.saved_states.append(PersistentRiskState(**state.__dict__))
         self.risk_state = state
 
-    def get_latest_equity_before_market_date(self, market_date: str) -> EquitySnapshot | None:
+    def get_latest_equity_before_market_date(
+        self, market_date: str
+    ) -> EquitySnapshot | None:
         if self.previous_equity is None:
             return None
         if (
@@ -144,7 +164,9 @@ class FakeStateStore:
         return None
 
     def record_equity(self, account_value, cash, positions, market_date=None):
-        self.recorded_equity.append({"account_value": account_value, "market_date": market_date})
+        self.recorded_equity.append(
+            {"account_value": account_value, "market_date": market_date}
+        )
 
     def record_positions(self, positions, prices):
         self.recorded_positions.append({"positions": dict(positions)})
@@ -167,12 +189,14 @@ class FakeStateStore:
         filled_at=None,
     ):
         self.order_status_updates.append((str(order_id), status, filled_quantity))
-        self.order_status_update_details.append({
-            "fill_price": fill_price,
-            "broker_accepted_price": broker_accepted_price,
-            "fee_amount": fee_amount,
-            "filled_at": filled_at,
-        })
+        self.order_status_update_details.append(
+            {
+                "fill_price": fill_price,
+                "broker_accepted_price": broker_accepted_price,
+                "fee_amount": fee_amount,
+                "filled_at": filled_at,
+            }
+        )
 
     def update_order_id(self, old_order_id, new_order_id):
         pass
@@ -205,6 +229,7 @@ def _default_settings(**kwargs) -> Settings:
 # ---------------------------------------------------------------------------
 # run_auto_monitor tests
 # ---------------------------------------------------------------------------
+
 
 def test_run_auto_monitor_exits_immediately_on_kill_switch(monkeypatch):
     from moomoo_bot import orchestrator
@@ -251,7 +276,9 @@ def test_run_auto_monitor_retries_on_failure_then_stops(monkeypatch):
     def fake_sleep(seconds: float) -> None:
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr(cycle_module, "execute_trading_cycle", fake_execute_trading_cycle)
+    monkeypatch.setattr(
+        cycle_module, "execute_trading_cycle", fake_execute_trading_cycle
+    )
 
     orchestrator.run_auto_monitor(
         settings=settings,

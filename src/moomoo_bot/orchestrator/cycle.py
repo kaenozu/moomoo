@@ -221,7 +221,9 @@ def reconcile_pending_orders(state_store, trade_client) -> int:
                 if not order_id:
                     continue
 
-                if pending_order.order_id and str(pending_order.order_id).startswith("internal_"):
+                if pending_order.order_id and str(pending_order.order_id).startswith(
+                    "internal_"
+                ):
                     update_order_id = getattr(state_store, "update_order_id", None)
                     if callable(update_order_id):
                         update_order_id(str(pending_order.order_id), order_id)
@@ -428,7 +430,9 @@ def execute_trading_cycle(
             stack.enter_context(trade_client)
         if owns_state_store:
             state_store = StateStore(
-                db_path=local_sim_state_db_path if use_local_sim else settings.state_db_path,
+                db_path=local_sim_state_db_path
+                if use_local_sim
+                else settings.state_db_path,
                 execution_mode=settings.execution_mode,
             )
             stack.enter_context(state_store)
@@ -460,7 +464,11 @@ def execute_trading_cycle(
 
             persistent_risk_state = state_store.load_risk_state()
             risk_state = restore_risk_state(persistent_risk_state)
-            if not use_local_sim and buying_power_usd is not None and buying_power_usd <= 0.0:
+            if (
+                not use_local_sim
+                and buying_power_usd is not None
+                and buying_power_usd <= 0.0
+            ):
                 logger.warning(
                     "Paper account has no positive buying power; attempting repair."
                 )
@@ -479,7 +487,13 @@ def execute_trading_cycle(
                 if callable(buying_power_getter):
                     try:
                         refreshed_buying_power_usd = float(buying_power_getter())
-                    except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
+                    except (
+                        ValueError,
+                        TypeError,
+                        ConnectionError,
+                        TimeoutError,
+                        RuntimeError,
+                    ) as exc:
                         logger.warning(
                             "Failed to refresh paper buying power after repair: %s", exc
                         )
@@ -487,7 +501,9 @@ def execute_trading_cycle(
 
                 if refreshed_buying_power_usd > 0.0:
                     buying_power_usd = refreshed_buying_power_usd
-                    paper_capital_usd = min(requested_paper_capital_usd, buying_power_usd)
+                    paper_capital_usd = min(
+                        requested_paper_capital_usd, buying_power_usd
+                    )
                 else:
                     submit_orders = False
                     preview_only_due_broker_lock = True
@@ -548,11 +564,17 @@ def execute_trading_cycle(
             market_date = market_date_for_frame(price_frame)
             prepare_persistent_state_for_market_date(persistent_risk_state, market_date)
             record_state_snapshot(
-                state_store, account_value, current_positions, latest_prices, market_date
+                state_store,
+                account_value,
+                current_positions,
+                latest_prices,
+                market_date,
             )
             reconcile_pending_orders(state_store, trade_client)
             cleanup_equity_history(state_store, settings.equity_retention_days)
-            clear_expired_daily_loss_halt(risk_state, persistent_risk_state, market_date)
+            clear_expired_daily_loss_halt(
+                risk_state, persistent_risk_state, market_date
+            )
 
             if preview_only_due_broker_lock:
                 risk_halted = False
@@ -632,7 +654,9 @@ def execute_trading_cycle(
                     f"Capital input: {account_value:,.2f} USD (from {mode_label} account)"
                 )
             else:
-                console.print(f"Capital input: {capital:,.2f} {settings.capital_currency}")
+                console.print(
+                    f"Capital input: {capital:,.2f} {settings.capital_currency}"
+                )
                 console.print(f"Capital used for sizing: {account_value:,.2f} USD")
             if not market_open:
                 console.print(
@@ -725,7 +749,11 @@ def execute_trading_cycle(
 
             return True
         finally:
-            if use_local_sim and _local_sim is not None and local_sim_applied_orders == 0:
+            if (
+                use_local_sim
+                and _local_sim is not None
+                and local_sim_applied_orders == 0
+            ):
                 try:
                     # When orders were synced through a freshly loaded simulator instance,
                     # saving the stale pre-sync object here would clobber persisted positions.

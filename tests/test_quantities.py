@@ -1,4 +1,5 @@
 """Tests for quantities.py - fractional share rounding utilities."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,6 +10,7 @@ from moomoo_bot.quantities import floor_quantity, round_quantity_toward_zero
 # ---------------------------------------------------------------------------
 # floor_quantity
 # ---------------------------------------------------------------------------
+
 
 def test_floor_quantity_whole_share():
     assert floor_quantity(3.0) == 3.0
@@ -63,6 +65,7 @@ def test_floor_quantity_fractional_precision_unit():
 # ---------------------------------------------------------------------------
 # round_quantity_toward_zero
 # ---------------------------------------------------------------------------
+
 
 def test_round_quantity_toward_zero_positive():
     result = round_quantity_toward_zero(1.9999, precision=1000.0)

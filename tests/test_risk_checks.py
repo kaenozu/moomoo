@@ -1,10 +1,10 @@
 """Tests for orchestrator/risk_checks.py - risk check orchestration."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 import pandas as pd
-import pytest
 
 from moomoo_bot.config import Settings
 from moomoo_bot.risk import RiskState
@@ -14,6 +14,7 @@ from moomoo_bot.state import EquitySnapshot, PersistentRiskState
 # ---------------------------------------------------------------------------
 # Minimal fakes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FakeStateStore:
@@ -30,7 +31,9 @@ class FakeStateStore:
         self.saved_states.append(PersistentRiskState(**state.__dict__))
         self.risk_state = state
 
-    def get_latest_equity_before_market_date(self, market_date: str) -> EquitySnapshot | None:
+    def get_latest_equity_before_market_date(
+        self, market_date: str
+    ) -> EquitySnapshot | None:
         if self.previous_equity is None:
             return None
         if (
@@ -55,7 +58,9 @@ class FakeTradeClient:
     def submit_order(self, instruction):
         self.submit_order_calls += 1
         self.submitted_sides.append(str(instruction.side))
-        return pd.DataFrame({"order_id": [self.submit_order_calls], "order_status": ["FILLED"]})
+        return pd.DataFrame(
+            {"order_id": [self.submit_order_calls], "order_status": ["FILLED"]}
+        )
 
     def get_order_frame(self, refresh_cache: bool = True) -> pd.DataFrame:
         return pd.DataFrame()
@@ -82,20 +87,25 @@ def _default_settings(**kwargs) -> Settings:
     )
 
 
-def _make_risk_state(halted: bool = False, halted_reason: str | None = None) -> RiskState:
+def _make_risk_state(
+    halted: bool = False, halted_reason: str | None = None
+) -> RiskState:
     state = RiskState()
     state.halted = halted
     state.halted_reason = halted_reason
     return state
 
 
-def _make_persistent(halted: bool = False, halted_reason: str | None = None) -> PersistentRiskState:
+def _make_persistent(
+    halted: bool = False, halted_reason: str | None = None
+) -> PersistentRiskState:
     return PersistentRiskState(halted=halted, halted_reason=halted_reason)
 
 
 # ---------------------------------------------------------------------------
 # check_daily_loss_halt
 # ---------------------------------------------------------------------------
+
 
 def test_check_daily_loss_halt_returns_none_when_not_halted():
     from moomoo_bot.orchestrator.risk_checks import check_daily_loss_halt
@@ -163,6 +173,7 @@ def test_check_daily_loss_halt_returns_true_when_already_daily_loss_halted():
 # ---------------------------------------------------------------------------
 # check_market_shock
 # ---------------------------------------------------------------------------
+
 
 def test_check_market_shock_returns_none_below_threshold():
     from moomoo_bot.orchestrator.risk_checks import check_market_shock
@@ -239,6 +250,7 @@ def test_check_market_shock_zero_threshold_returns_none():
 # ---------------------------------------------------------------------------
 # check_daily_loss_limit
 # ---------------------------------------------------------------------------
+
 
 def test_check_daily_loss_limit_returns_none_when_no_prior_equity():
     from moomoo_bot.orchestrator.risk_checks import check_daily_loss_limit
@@ -328,6 +340,7 @@ def test_check_daily_loss_limit_returns_none_when_below_threshold():
 # ---------------------------------------------------------------------------
 # check_monthly_loss_limit
 # ---------------------------------------------------------------------------
+
 
 def test_check_monthly_loss_limit_returns_none_when_no_month_start():
     from moomoo_bot.orchestrator.risk_checks import check_monthly_loss_limit

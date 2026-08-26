@@ -17,7 +17,7 @@ from moomoo_bot.exceptions import (
 
 class TestMoomooBotError:
     """Tests for MoomooBotError base exception."""
-    
+
     def test_base_exception_creation(self) -> None:
         """Test that base exception can be created."""
         exc = MoomooBotError("Test error")
@@ -44,7 +44,7 @@ class TestMoomooBotError:
 
 class TestConfigurationError:
     """Tests for ConfigurationError."""
-    
+
     def test_configuration_error_creation(self) -> None:
         exc = ConfigurationError("Invalid config")
         assert str(exc) == "Invalid config"
@@ -68,7 +68,7 @@ class TestConfigurationError:
 
 class TestBrokerConnectionError:
     """Tests for BrokerConnectionError."""
-    
+
     def test_broker_connection_error_creation(self) -> None:
         exc = BrokerConnectionError("Connection refused")
         assert str(exc) == "Connection refused"
@@ -84,7 +84,7 @@ class TestBrokerConnectionError:
 
 class TestRiskHaltError:
     """Tests for RiskHaltError."""
-    
+
     def test_risk_halt_error_creation(self) -> None:
         exc = RiskHaltError("Max drawdown exceeded")
         assert str(exc) == "Max drawdown exceeded"
@@ -107,7 +107,7 @@ class TestRiskHaltError:
 
 class TestOrderRejectedError:
     """Tests for OrderRejectedError."""
-    
+
     def test_order_rejected_error_creation(self) -> None:
         exc = OrderRejectedError("Order rejected by broker")
         assert str(exc) == "Order rejected by broker"
@@ -127,7 +127,7 @@ class TestOrderRejectedError:
             "Order size too small",
             "Market closed",
         ]
-        
+
         for message in messages:
             try:
                 raise OrderRejectedError(message)
@@ -137,7 +137,7 @@ class TestOrderRejectedError:
 
 class TestDataError:
     """Tests for DataError."""
-    
+
     def test_data_error_creation(self) -> None:
         exc = DataError("Missing price data")
         assert str(exc) == "Missing price data"
@@ -160,7 +160,7 @@ class TestDataError:
 
 class TestOrderTimeoutError:
     """Tests for OrderTimeoutError."""
-    
+
     def test_order_timeout_error_creation(self) -> None:
         exc = OrderTimeoutError("Order submission timed out")
         assert str(exc) == "Order submission timed out"
@@ -183,7 +183,7 @@ class TestOrderTimeoutError:
 
 class TestExceptionHierarchy:
     """Tests for exception inheritance hierarchy."""
-    
+
     def test_all_custom_exceptions_inherit_from_base(self) -> None:
         """Test that all custom exceptions inherit from MoomooBotError."""
         exceptions = [
@@ -194,7 +194,7 @@ class TestExceptionHierarchy:
             DataError("test"),
             OrderTimeoutError("test"),
         ]
-        
+
         for exc in exceptions:
             assert isinstance(exc, MoomooBotError)
             assert isinstance(exc, Exception)
@@ -209,7 +209,7 @@ class TestExceptionHierarchy:
             DataError("data"),
             OrderTimeoutError("timeout"),
         ]
-        
+
         for exc_to_raise in exceptions_to_raise:
             with pytest.raises(MoomooBotError):
                 raise exc_to_raise

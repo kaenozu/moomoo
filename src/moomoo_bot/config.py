@@ -102,7 +102,7 @@ class Settings(BaseSettings):
             return v
         # Moomoo US stocks は通常 "US.AAPL" 形式。大文字ALPHANUMERIC、ドット付き。
         # より寛容に: 英大文字と数字とドットのみ、少なくとも1文字のドットを含む。
-        symbol_pattern = re.compile(r'^[A-Z0-9]+(?:\.[A-Z0-9]+)+$')
+        symbol_pattern = re.compile(r"^[A-Z0-9]+(?:\.[A-Z0-9]+)+$")
         for sym in parts:
             if not symbol_pattern.match(sym):
                 raise ValueError(

@@ -96,7 +96,9 @@ class StateStore(_QueryMixin, _LedgerMixin):
     def _connect(self) -> sqlite3.Connection:
         with self._lock:
             if self._conn is None:
-                self._conn = sqlite3.connect(str(self.db_path), timeout=10, check_same_thread=False)
+                self._conn = sqlite3.connect(
+                    str(self.db_path), timeout=10, check_same_thread=False
+                )
                 self._conn.row_factory = sqlite3.Row
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA wal_autocheckpoint=1000")
@@ -362,18 +364,20 @@ class StateStore(_QueryMixin, _LedgerMixin):
     def update_order_id(self, old_order_id: str, new_order_id: str) -> None:
         """Replace a temporary internal order_id with the actual broker order_id."""
         if not old_order_id or not new_order_id:
-            raise ValueError("old_order_id and new_order_id must both be non-empty strings")
+            raise ValueError(
+                "old_order_id and new_order_id must both be non-empty strings"
+            )
         conn = self._connect()
         with self._lock:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 conn.execute(
                     "UPDATE order_history SET order_id = ? WHERE order_id = ?",
-                    (str(new_order_id), str(old_order_id))
+                    (str(new_order_id), str(old_order_id)),
                 )
                 conn.execute(
                     "UPDATE execution_fill_ledger SET order_id = ? WHERE order_id = ?",
-                    (str(new_order_id), str(old_order_id))
+                    (str(new_order_id), str(old_order_id)),
                 )
                 conn.commit()
             except Exception:

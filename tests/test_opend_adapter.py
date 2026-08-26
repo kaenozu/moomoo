@@ -47,7 +47,9 @@ def test_fetch_history_combines_pages_and_sorts_rows() -> None:
 
     history = client.fetch_history("US.AAPL", start="2025-01-01", end="2025-01-03")
 
-    assert list(history.index) == list(pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-03"]))
+    assert list(history.index) == list(
+        pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-03"])
+    )
     assert history.loc[pd.Timestamp("2025-01-02"), "close"] == 101.0
     assert fake_context.call_count == 2
     client.close()
@@ -159,10 +161,14 @@ class FakeQuoteContext:
         )
 
     def get_market_snapshot(self, code_list):
-        return RET_OK, pd.DataFrame({"code": list(code_list), "last_price": [1.0] * len(code_list)})
+        return RET_OK, pd.DataFrame(
+            {"code": list(code_list), "last_price": [1.0] * len(code_list)}
+        )
 
     def get_market_state(self, code_list):
-        return RET_OK, pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
+        return RET_OK, pd.DataFrame(
+            {"code": list(code_list), "market_state": ["MORNING"] * len(code_list)}
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -212,13 +218,17 @@ class RetryAfterTimeoutQuoteContext(FakeQuoteContext):
         self.snapshot_call_count += 1
         if self.snapshot_call_count == 1:
             return 1, "NN_ProtoRet_TimeOut"
-        return RET_OK, pd.DataFrame({"code": list(code_list), "last_price": [1.0] * len(code_list)})
+        return RET_OK, pd.DataFrame(
+            {"code": list(code_list), "last_price": [1.0] * len(code_list)}
+        )
 
     def get_market_state(self, code_list):
         self.market_state_call_count += 1
         if self.market_state_call_count == 1:
             return 1, "NN_ProtoRet_TimeOut"
-        return RET_OK, pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
+        return RET_OK, pd.DataFrame(
+            {"code": list(code_list), "market_state": ["MORNING"] * len(code_list)}
+        )
 
 
 class PermanentFailureQuoteContext(FakeQuoteContext):

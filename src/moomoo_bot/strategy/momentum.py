@@ -187,7 +187,9 @@ class MonthlyMomentumRotationStrategy:
                             vol = returns.std()
                             vols[symbol] = vol if vol > 0 else 1.0
 
-                        inverse_vols = {symbol: 1.0 / vol for symbol, vol in vols.items()}
+                        inverse_vols = {
+                            symbol: 1.0 / vol for symbol, vol in vols.items()
+                        }
                         total_inverse_vol = sum(inverse_vols.values())
                         new_weights = {
                             symbol: (inverse_vols[symbol] / total_inverse_vol)
@@ -215,6 +217,7 @@ class MonthlyMomentumRotationStrategy:
         return TradeDecision(
             as_of=as_of, target_weights=self._current_weights, reason=reason
         )
+
 
 class CoreSatelliteStrategy:
     """Blend an active strategy sleeve with a benchmark core sleeve."""
@@ -264,7 +267,6 @@ class CoreSatelliteStrategy:
             target_weights=active_weights,
             reason=f"{decision.reason}:core_satellite={self.satellite_weight:.0%}/{(1.0 - self.satellite_weight):.0%}",
         )
-
 
 
 class DynamicCoreSatelliteStrategy(CoreSatelliteStrategy):

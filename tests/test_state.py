@@ -31,23 +31,35 @@ def test_init_creates_tables(state_store: StateStore):
     cursor = conn.cursor()
 
     # Check risk_state table
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='risk_state'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='risk_state'"
+    )
     assert cursor.fetchone() is not None
 
     # Check order_history table
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='order_history'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='order_history'"
+    )
     assert cursor.fetchone() is not None
 
     # Check equity_curve table
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='equity_curve'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='equity_curve'"
+    )
     assert cursor.fetchone() is not None
 
     # Check execution ledger tables
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='execution_fill_ledger'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='execution_fill_ledger'"
+    )
     assert cursor.fetchone() is not None
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_lots'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tax_lots'"
+    )
     assert cursor.fetchone() is not None
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_lot_realizations'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tax_lot_realizations'"
+    )
     assert cursor.fetchone() is not None
 
     conn.close()
@@ -238,7 +250,9 @@ def test_get_latest_equity_before_market_date(state_store: StateStore):
     assert snapshot.market_date == "2025-01-02"
 
 
-def test_update_order_status_records_execution_fill_and_open_tax_lots(state_store: StateStore):
+def test_update_order_status_records_execution_fill_and_open_tax_lots(
+    state_store: StateStore,
+):
     state_store.record_order(
         OrderRecord(
             order_id="buy-1",
@@ -286,10 +300,15 @@ def test_update_order_status_records_execution_fill_and_open_tax_lots(state_stor
     assert recent_order.broker_accepted_price == pytest.approx(100.5)
 
     assert [lot.remaining_quantity for lot in open_lots] == [4.0, 6.0]
-    assert [lot.cost_basis_price for lot in open_lots] == [pytest.approx(101.8), pytest.approx(102.2)]
+    assert [lot.cost_basis_price for lot in open_lots] == [
+        pytest.approx(101.8),
+        pytest.approx(102.2),
+    ]
 
 
-def test_sell_fills_consume_tax_lots_fifo_and_record_realizations(state_store: StateStore):
+def test_sell_fills_consume_tax_lots_fifo_and_record_realizations(
+    state_store: StateStore,
+):
     state_store.record_order(
         OrderRecord(
             order_id="buy-1",
@@ -419,7 +438,6 @@ def test_summarize_execution_activity_rolls_up_fills_realizations_and_pending_or
     assert summary.realized_pnl == pytest.approx(26.1)
     assert summary.last_fill_at == "2025-01-03T15:30:00+00:00"
     assert summary.last_realization_at == "2025-01-03T15:30:00+00:00"
-
 
 
 def test_close(state_store: StateStore):

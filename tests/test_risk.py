@@ -13,7 +13,9 @@ from moomoo_bot.risk import (
 
 
 def test_detect_market_shock_triggers_on_large_benchmark_drop() -> None:
-    benchmark = pd.Series([100.0, 94.0], index=pd.date_range("2025-01-01", periods=2, freq="B"))
+    benchmark = pd.Series(
+        [100.0, 94.0], index=pd.date_range("2025-01-01", periods=2, freq="B")
+    )
 
     reason = detect_market_shock(benchmark, drop_pct=0.05)
 
@@ -44,15 +46,24 @@ def test_build_stop_loss_take_profit_orders_exits_breached_positions() -> None:
     )
     latest_prices = {"US.AAPL": 89.0, "US.MSFT": 125.0}
 
-    orders = build_stop_loss_take_profit_orders(position_rows, latest_prices, stop_loss_pct=0.10, take_profit_pct=0.20)
+    orders = build_stop_loss_take_profit_orders(
+        position_rows, latest_prices, stop_loss_pct=0.10, take_profit_pct=0.20
+    )
 
     assert [order.symbol for order in orders] == ["US.AAPL", "US.MSFT"]
     assert [order.quantity for order in orders] == [10.0, 5.0]
-    assert [order.reason.split(":")[1] for order in orders] == ["stop_loss", "take_profit"]
+    assert [order.reason.split(":")[1] for order in orders] == [
+        "stop_loss",
+        "take_profit",
+    ]
 
 
 def test_build_liquidation_orders_sells_all_positions() -> None:
-    orders = build_liquidation_orders({"US.AAPL": 3.0, "US.MSFT": 1.5}, {"US.AAPL": 90.0, "US.MSFT": 80.0}, "risk:halt")
+    orders = build_liquidation_orders(
+        {"US.AAPL": 3.0, "US.MSFT": 1.5},
+        {"US.AAPL": 90.0, "US.MSFT": 80.0},
+        "risk:halt",
+    )
 
     assert [order.symbol for order in orders] == ["US.AAPL", "US.MSFT"]
     assert [order.quantity for order in orders] == [3.0, 1.5]
@@ -82,7 +93,9 @@ def test_build_liquidation_orders_respect_fractional_precision() -> None:
     assert orders[0].quantity == 0.3
 
 
-def test_build_stop_loss_take_profit_orders_can_route_closed_market_exits_to_eth() -> None:
+def test_build_stop_loss_take_profit_orders_can_route_closed_market_exits_to_eth() -> (
+    None
+):
     position_rows = pd.DataFrame(
         {
             "code": ["US.AAPL"],

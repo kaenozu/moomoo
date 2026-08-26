@@ -108,7 +108,8 @@ class _QueryMixin:
         if since:
             with self._lock:
                 rows = conn.execute(
-                    "SELECT * FROM equity_curve WHERE timestamp >= ? ORDER BY id", (since,)
+                    "SELECT * FROM equity_curve WHERE timestamp >= ? ORDER BY id",
+                    (since,),
                 ).fetchall()
         else:
             with self._lock:

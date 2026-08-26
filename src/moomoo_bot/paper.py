@@ -16,7 +16,6 @@ from moomoo import Session, TrdSide
 
 from moomoo_bot.quantities import round_quantity_toward_zero
 from moomoo_bot.strategy.base import TradeDecision
-from moomoo_bot.retry import with_retries, DEFAULT_MAX_RETRIES, DEFAULT_BASE_DELAY
 
 
 @dataclass(frozen=True)

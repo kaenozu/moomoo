@@ -14,7 +14,9 @@ from moomoo_bot.strategy.base import TradeDecision
 
 
 def test_strategy_waits_for_history() -> None:
-    strategy = MomentumRotationStrategy(MomentumRotationConfig(lookback_days=5, trend_days=10, top_n=2))
+    strategy = MomentumRotationStrategy(
+        MomentumRotationConfig(lookback_days=5, trend_days=10, top_n=2)
+    )
     prices = pd.DataFrame({"US.AAPL": [100, 101, 102, 103, 104, 105]})
     decision = strategy.decide(prices, prices.index[-1])
     assert decision.target_weights == {}
@@ -22,7 +24,9 @@ def test_strategy_waits_for_history() -> None:
 
 
 def test_strategy_selects_top_symbols_above_trend() -> None:
-    strategy = MomentumRotationStrategy(MomentumRotationConfig(lookback_days=5, trend_days=10, top_n=2))
+    strategy = MomentumRotationStrategy(
+        MomentumRotationConfig(lookback_days=5, trend_days=10, top_n=2)
+    )
     index = pd.date_range("2025-01-01", periods=12, freq="B")
     prices = pd.DataFrame(
         {
@@ -39,7 +43,9 @@ def test_strategy_selects_top_symbols_above_trend() -> None:
 
 def test_monthly_momentum_strategy_rebalances_and_holds() -> None:
     strategy = MonthlyMomentumRotationStrategy(
-        MonthlyMomentumRotationConfig(lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5)
+        MonthlyMomentumRotationConfig(
+            lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5
+        )
     )
     index = pd.date_range("2025-01-01", periods=40, freq="B")
     prices = pd.DataFrame(
@@ -68,7 +74,9 @@ def test_monthly_momentum_strategy_rebalances_and_holds() -> None:
 
 def test_monthly_momentum_strategy_stays_in_cash_without_trend() -> None:
     strategy = MonthlyMomentumRotationStrategy(
-        MonthlyMomentumRotationConfig(lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5)
+        MonthlyMomentumRotationConfig(
+            lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5
+        )
     )
     index = pd.date_range("2025-01-01", periods=40, freq="B")
     prices = pd.DataFrame(

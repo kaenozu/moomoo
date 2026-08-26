@@ -31,7 +31,11 @@ def _build_position_frame_from_sim(sim) -> "pd.DataFrame":
         for pos in sim.positions.values()
         if pos.quantity > 0.0
     ]
-    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["code", "qty", "cost_price"])
+    return (
+        pd.DataFrame(rows)
+        if rows
+        else pd.DataFrame(columns=["code", "qty", "cost_price"])
+    )
 
 
 def _reset_local_sim_state_store(state_store) -> None:
@@ -90,7 +94,9 @@ def _sync_orders_to_local_simulator(
                 applied_count += 1
         sim.mark_to_market(prices)
         sim.save()
-        logger.info("Synced %d orders to local simulator (%s)", applied_count, local_sim_path)
+        logger.info(
+            "Synced %d orders to local simulator (%s)", applied_count, local_sim_path
+        )
         return applied_count
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to sync orders to local simulator: %s", exc)

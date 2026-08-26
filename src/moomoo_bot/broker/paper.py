@@ -33,7 +33,9 @@ from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 
-_START_MAX_RETRIES = 3
+# ``with_retries`` counts retries after the initial call. Keep three total
+# broker attempts, matching the previous paper-trading behavior.
+_START_MAX_RETRIES = 2
 _START_RETRY_DELAY_SECONDS = 2.0
 
 _ACTIVE_ORDER_STATUS_NAMES = frozenset(
@@ -200,7 +202,9 @@ class MoomooPaperTradeClient:
         exceptions=TRANSIENT_EXCEPTIONS,
         raise_on_failure=OrderTimeoutError,
     )
-    def _submit_order_with_retry(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
+    def _submit_order_with_retry(
+        self, instruction: PaperOrderInstruction
+    ) -> pd.DataFrame:
         """Internal retry-wrapped order submission."""
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
@@ -226,7 +230,6 @@ class MoomooPaperTradeClient:
         if not isinstance(data, pd.DataFrame) or data.empty:
             raise DataError(f"Broker order response invalid: {data}")
         return data
-
 
 
 def _is_active_order_status(status: object) -> bool:

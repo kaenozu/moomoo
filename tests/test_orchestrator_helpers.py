@@ -104,7 +104,10 @@ def test_signed_position_quantities_reads_alias_columns_and_preserves_shorts() -
 def test_effective_max_position_weight_halves_only_at_active_drawdown_tier() -> None:
     assert effective_max_position_weight(0.4, RiskState(drawdown_tier=0)) == 0.4
     assert effective_max_position_weight(0.4, RiskState(drawdown_tier=1)) == 0.2
-    assert effective_max_position_weight(0.4, RiskState(halted=True, drawdown_tier=2)) == 0.4
+    assert (
+        effective_max_position_weight(0.4, RiskState(halted=True, drawdown_tier=2))
+        == 0.4
+    )
 
 
 def test_market_date_for_frame_accepts_string_index_values() -> None:

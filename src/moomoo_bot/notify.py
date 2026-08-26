@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from time import sleep
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
-from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS, DEFAULT_BASE_DELAY
+from moomoo_bot.retry import with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +21,11 @@ logger = logging.getLogger(__name__)
 _ALLOWED_SCHEMES = {"https"}
 # 危険なホストパターン: localhost, プライベートIP範囲等をブロック
 _FORBIDDEN_HOST_PATTERNS = [
-    re.compile(r'^localhost$', re.IGNORECASE),
-    re.compile(r'^127\.0\.0\.1$'),
-    re.compile(r'^10\.\d+\.\d+\.\d+$'),
-    re.compile(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$'),
-    re.compile(r'^192\.168\.\d+\.\d+$'),
+    re.compile(r"^localhost$", re.IGNORECASE),
+    re.compile(r"^127\.0\.0\.1$"),
+    re.compile(r"^10\.\d+\.\d+\.\d+$"),
+    re.compile(r"^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$"),
+    re.compile(r"^192\.168\.\d+\.\d+$"),
 ]
 
 
@@ -48,7 +47,9 @@ def send_webhook(url: str, payload: dict) -> bool:
     hostname = parsed.hostname or ""
     for pattern in _FORBIDDEN_HOST_PATTERNS:
         if pattern.match(hostname):
-            logger.warning("Webhook URL points to disallowed host %s: %s", hostname, url)
+            logger.warning(
+                "Webhook URL points to disallowed host %s: %s", hostname, url
+            )
             return False
 
     try:

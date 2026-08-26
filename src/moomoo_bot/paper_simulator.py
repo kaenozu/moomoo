@@ -183,9 +183,7 @@ class PaperSimulator:
             if notional > self.cash:
                 raise ValueError("insufficient cash")
             new_qty = current.quantity + qty
-            new_avg_cost = (
-                (current.avg_cost * current.quantity) + notional
-            ) / new_qty
+            new_avg_cost = ((current.avg_cost * current.quantity) + notional) / new_qty
             current.quantity = new_qty
             current.avg_cost = new_avg_cost
             self.cash -= notional

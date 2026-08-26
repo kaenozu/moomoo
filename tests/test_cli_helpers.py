@@ -170,7 +170,9 @@ def test_submit_orders_does_not_skip_stale_pending_state_order(tmp_path) -> None
     )
 
     try:
-        stale_submitted_at = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        stale_submitted_at = (
+            datetime.now(timezone.utc) - timedelta(minutes=30)
+        ).isoformat()
         state_store.record_order(
             OrderRecord(
                 order_id="stale-pending-1",

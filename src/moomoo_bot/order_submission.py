@@ -195,9 +195,7 @@ def _handle_submission_exception(
     if _is_rejected_order_error(exc):
         from moomoo_bot.cli_render import console
 
-        console.print(
-            f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
-        )
+        console.print(f"Skipping {mode_label} order for {instruction.symbol}: {exc}")
         return 0
 
     logger.warning("Order submission failed: %s", exc)
@@ -266,7 +264,9 @@ def _sync_state_order_from_broker_match(
         or matching_order.get("orderid")
         or matching_order.get("id")
     )
-    resolved_order_id = str(broker_order_id).strip() if broker_order_id is not None else ""
+    resolved_order_id = (
+        str(broker_order_id).strip() if broker_order_id is not None else ""
+    )
     effective_order_id = resolved_order_id or pending_internal_id
     if not effective_order_id:
         return
@@ -361,7 +361,9 @@ def _is_rejected_order_error(exc: Exception) -> bool:
     )
 
 
-def _persist_order_and_immediate_fill(state_store, order_record, response, already_in_db: bool = False) -> None:
+def _persist_order_and_immediate_fill(
+    state_store, order_record, response, already_in_db: bool = False
+) -> None:
     update_order_status = getattr(state_store, "update_order_status", None)
     normalized_status = str(order_record.status or "").strip().lower().replace("-", "_")
     has_immediate_fill = float(order_record.filled_quantity or 0.0) > 0.0
@@ -413,7 +415,13 @@ def _persist_order_and_immediate_fill(state_store, order_record, response, alrea
             ),
             filled_at=_response_first_value(
                 response,
-                ("updated_time", "updated_at", "create_time", "created_at", "fill_time"),
+                (
+                    "updated_time",
+                    "updated_at",
+                    "create_time",
+                    "created_at",
+                    "fill_time",
+                ),
             ),
         )
 

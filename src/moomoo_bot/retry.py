@@ -57,6 +57,7 @@ def with_retries(
     Returns:
         Decorated function with retry logic
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -67,7 +68,7 @@ def with_retries(
                 try:
                     result = func(*args, **kwargs)
                     if retry_on_result is not None and retry_on_result(result):
-                        if attempt <= max_retries + 1:
+                        if attempt < max_retries + 1:
                             logger.warning(
                                 "Retry triggered by result (attempt %d/%d)",
                                 attempt,
@@ -80,7 +81,7 @@ def with_retries(
                     return result
                 except exceptions as exc:
                     last_exc = exc
-                    if attempt <= max_retries + 1:
+                    if attempt < max_retries + 1:
                         logger.warning(
                             "%s attempt %d/%d failed: %s; retrying in %.1fs",
                             func.__name__,

@@ -7,8 +7,8 @@ when multiple threads access StateStore concurrently.
 from __future__ import annotations
 
 import random
-import string
 import threading
+from pathlib import Path
 from time import sleep
 
 import pytest
@@ -147,9 +147,9 @@ def test_concurrent_reads_during_writes(temp_db: Path) -> None:
     assert write_done.is_set(), "Writer did not finish in time"
 
 
-def test_lock_reentrancy() -> None:
+def test_lock_reentrancy(tmp_path: Path) -> None:
     """StateStore methods should be reentrant (RLock) to avoid self-deadlock."""
-    temp_db = Path("/tmp/test_reentrancy.db")  # Use temp file; cleanup later
+    temp_db = tmp_path / "test_reentrancy.db"
     store = StateStore(db_path=temp_db, execution_mode="paper")
 
     def recursive_operation(depth: int) -> None:
@@ -191,7 +191,9 @@ def test_concurrent_risk_state_updates(temp_db: Path) -> None:
             try:
                 persistent = store.load_risk_state()
                 # Modify peak incrementally to simulate drift
-                new_peak = (persistent.peak_account_value or 100_000.0) + (offset + 1) * 0.01
+                new_peak = (persistent.peak_account_value or 100_000.0) + (
+                    offset + 1
+                ) * 0.01
                 persistent.peak_account_value = new_peak
                 store.save_risk_state(persistent)
                 with lock:

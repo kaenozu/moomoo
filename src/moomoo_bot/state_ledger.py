@@ -11,7 +11,10 @@ import logging
 import sqlite3
 
 from moomoo_bot.state_types import ExecutionFillRecord
-from moomoo_bot.row_utils import normalize_side as _normalize_side, utc_now_iso as _utc_now_iso
+from moomoo_bot.row_utils import (
+    normalize_side as _normalize_side,
+    utc_now_iso as _utc_now_iso,
+)
 
 logger = logging.getLogger(__name__)
 

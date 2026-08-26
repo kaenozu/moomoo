@@ -61,10 +61,18 @@ def _halt_and_liquidate(
         risk_state.drawdown_tier = max(risk_state.drawdown_tier, 2)
 
     save_risk_state(
-        state_store, risk_state, persistent_risk_state, market_date, account_value,
+        state_store,
+        risk_state,
+        persistent_risk_state,
+        market_date,
+        account_value,
     )
     return build_risk_liquidation_orders(
-        current_positions, latest_prices, reason, settings, market_open,
+        current_positions,
+        latest_prices,
+        reason,
+        settings,
+        market_open,
     )
 
 
@@ -114,8 +122,12 @@ def check_daily_loss_halt(
     from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
 
     render_and_submit_risk_liquidation(
-        trade_client, orders, current_positions, mode_label,
-        submit_orders=submit_orders, state_store=state_store,
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
     )
     return True, False
 
@@ -223,8 +235,12 @@ def check_daily_loss_limit(
     from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
 
     render_and_submit_risk_liquidation(
-        trade_client, orders, current_positions, mode_label,
-        submit_orders=submit_orders, state_store=state_store,
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
     )
     return True, False
 
@@ -252,7 +268,9 @@ def check_monthly_loss_limit(
         else None
     )
     monthly_loss_reason = detect_monthly_loss_limit(
-        month_start_equity, account_value, settings.monthly_loss_limit_pct,
+        month_start_equity,
+        account_value,
+        settings.monthly_loss_limit_pct,
     )
     if not monthly_loss_reason:
         return None
@@ -290,8 +308,12 @@ def check_monthly_loss_limit(
     from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
 
     render_and_submit_risk_liquidation(
-        trade_client, orders, current_positions, mode_label,
-        submit_orders=submit_orders, state_store=state_store,
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
     )
     return True, False
 
@@ -318,7 +340,10 @@ def check_drawdown(
 ) -> tuple[bool, bool] | None:
     """Return (True, False) if max drawdown breached; None to continue."""
     drawdown_reason = update_drawdown_state(
-        account_value, risk_state, settings.max_drawdown_pct, settings.max_drawdown_reset_pct,
+        account_value,
+        risk_state,
+        settings.max_drawdown_pct,
+        settings.max_drawdown_reset_pct,
     )
     if not drawdown_reason:
         return None
@@ -370,8 +395,12 @@ def check_drawdown(
     from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
 
     render_and_submit_risk_liquidation(
-        trade_client, orders, current_positions, mode_label,
-        submit_orders=submit_orders, state_store=state_store,
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
     )
     return True, False
 
@@ -398,7 +427,9 @@ def check_ev_halt(
     if settings.ev_lookback_trades <= 0:
         return None
 
-    recent_realizations = state_store.get_recent_realizations(settings.ev_lookback_trades)
+    recent_realizations = state_store.get_recent_realizations(
+        settings.ev_lookback_trades
+    )
     ev_halt_reason, ev_should_reduce = detect_low_ev_condition(
         recent_realizations,
         settings.ev_lookback_trades,
@@ -441,8 +472,12 @@ def check_ev_halt(
     from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
 
     render_and_submit_risk_liquidation(
-        trade_client, orders, current_positions, mode_label,
-        submit_orders=submit_orders, state_store=state_store,
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
     )
     return True, False
 
@@ -574,6 +609,10 @@ def run_risk_checks(
                 ev_should_reduce = True
 
     save_risk_state(
-        state_store, risk_state, persistent_risk_state, market_date, account_value,
+        state_store,
+        risk_state,
+        persistent_risk_state,
+        market_date,
+        account_value,
     )
     return False, ev_should_reduce

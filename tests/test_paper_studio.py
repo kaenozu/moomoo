@@ -41,7 +41,9 @@ def test_build_execution_report_formats_new_trades(tmp_path) -> None:
     assert report["rows"][0]["売買"] == "購入"
 
 
-def test_run_strategy_from_ui_uses_run_paper_trade_defaults(monkeypatch, tmp_path) -> None:
+def test_run_strategy_from_ui_uses_run_paper_trade_defaults(
+    monkeypatch, tmp_path
+) -> None:
     settings = Settings(
         symbols="US.AAPL,US.MSFT",
         benchmark_symbol="US.VT",
@@ -170,8 +172,12 @@ def test_equity_history_preserves_unrealized_pnl(monkeypatch, tmp_path) -> None:
     paper_studio._append_live_equity("2026-04-27T00:00:00+00:00", 10125.0, 125.0)
     live_frame = paper_studio._live_equity_frame()
 
-    simulator = PaperSimulator.load(state_path=tmp_path / "paper-sim-state.json", initial_cash=10_000.0)
-    simulator.place_market_order(symbol="US.AAPL", side="BUY", quantity=10.0, price=100.0)
+    simulator = PaperSimulator.load(
+        state_path=tmp_path / "paper-sim-state.json", initial_cash=10_000.0
+    )
+    simulator.place_market_order(
+        symbol="US.AAPL", side="BUY", quantity=10.0, price=100.0
+    )
     simulator.mark_to_market({"US.AAPL": 112.5})
 
     stored_frame = paper_studio._equity_df(simulator)
@@ -202,7 +208,9 @@ def test_equity_chart_frames_split_scale_sensitive_series() -> None:
         ]
     )
 
-    equity_frame, pnl_frame = paper_studio._equity_chart_frames(live_equity_df, stored_equity_df)
+    equity_frame, pnl_frame = paper_studio._equity_chart_frames(
+        live_equity_df, stored_equity_df
+    )
 
     assert list(equity_frame.columns) == ["equity"]
     assert list(pnl_frame.columns) == ["unrealized_pnl"]
@@ -224,7 +232,11 @@ def test_seed_price_history_if_needed_loads_open_d_history(monkeypatch) -> None:
             return pd.DataFrame(
                 {"close": [100.0, 110.0, 105.0]},
                 index=pd.to_datetime(
-                    ["2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00", "2026-01-03T00:00:00+00:00"]
+                    [
+                        "2026-01-01T00:00:00+00:00",
+                        "2026-01-02T00:00:00+00:00",
+                        "2026-01-03T00:00:00+00:00",
+                    ]
                 ),
             )
 

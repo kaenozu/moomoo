@@ -121,12 +121,14 @@ def _clear_state_files(state_store: StateStore) -> None:
         backup_path = db_path.with_suffix(".db.bak")
         shutil.copy2(str(db_path), str(backup_path))
         logger.warning("Backing up and clearing state data: %s", db_path)
-    
+
     conn = state_store._connect()
     with state_store._lock:
         try:
             conn.execute("BEGIN IMMEDIATE")
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
             tables = [row[0] for row in cursor.fetchall()]
             for table in tables:
                 conn.execute(f"DELETE FROM {table}")
