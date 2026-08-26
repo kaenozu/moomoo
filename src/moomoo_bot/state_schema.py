@@ -166,15 +166,11 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "equity_curve", "market_date", "TEXT")
     _ensure_column(conn, "order_history", "broker_accepted_price", "REAL")
     _ensure_column(conn, "order_history", "avg_fill_price", "REAL")
-    _ensure_column(
-        conn, "order_history", "cumulative_fee_amount", "REAL DEFAULT 0.0"
-    )
+    _ensure_column(conn, "order_history", "cumulative_fee_amount", "REAL DEFAULT 0.0")
     _ensure_column(
         conn, "order_history", "cumulative_slippage_amount", "REAL DEFAULT 0.0"
     )
-    _ensure_column(
-        conn, "risk_state", "rule_violation_count", "INTEGER DEFAULT 0"
-    )
+    _ensure_column(conn, "risk_state", "rule_violation_count", "INTEGER DEFAULT 0")
     conn.commit()
 
     conn.execute(

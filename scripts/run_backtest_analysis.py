@@ -31,7 +31,7 @@ def backtest_with_config(
     min_hold_days: int = 0,
 ) -> dict:
     """指定されたパラメータでバックテスト実行"""
-    
+
     # 設定更新
     config = MonthlyMomentumRotationConfig(
         lookback_days=lookback_days,
@@ -43,11 +43,11 @@ def backtest_with_config(
         fallback_asset_symbol=None,
     )
     strategy = MonthlyMomentumRotationStrategy(config)
-    
+
     # データ取得
     symbols = settings.symbol_list
     benchmark = settings.benchmark_symbol
-    
+
     if quote_client is None:
         print("Using demo data...")
         price_frame, benchmark_series = make_demo_prices(
@@ -65,7 +65,7 @@ def backtest_with_config(
             price_frame, benchmark_series = make_demo_prices(
                 symbols, periods=max(lookback_days, trend_days) + 100
             )
-    
+
     # バックテスト実行
     result = run_backtest(
         price_frame,
@@ -74,7 +74,7 @@ def backtest_with_config(
         transaction_cost_per_trade=settings.transaction_cost_per_trade,
         transaction_cost_bps=settings.transaction_cost_bps,
     )
-    
+
     return {
         "config": config,
         "result": result,
@@ -87,21 +87,23 @@ def format_results(results: list[dict]) -> pd.DataFrame:
     for r in results:
         res = r["result"]
         cfg = r["config"]
-        rows.append({
-            "lookback": cfg.lookback_days,
-            "trend": cfg.trend_days,
-            "top_n": cfg.top_n,
-            "skip": cfg.skip_days,
-            "min_hold": cfg.min_hold_days,
-            "total_return": res.total_return,
-            "annual_return": res.cagr,
-            "sharpe": res.sharpe,
-            "max_dd": res.max_drawdown,
-            "sortino": res.sortino,
-            "calmar": res.calmar,
-            "trades": res.trade_count,
-            "tx_costs": res.transaction_costs,
-        })
+        rows.append(
+            {
+                "lookback": cfg.lookback_days,
+                "trend": cfg.trend_days,
+                "top_n": cfg.top_n,
+                "skip": cfg.skip_days,
+                "min_hold": cfg.min_hold_days,
+                "total_return": res.total_return,
+                "annual_return": res.cagr,
+                "sharpe": res.sharpe,
+                "max_dd": res.max_drawdown,
+                "sortino": res.sortino,
+                "calmar": res.calmar,
+                "trades": res.trade_count,
+                "tx_costs": res.transaction_costs,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -109,45 +111,65 @@ def main():
     print("=" * 80)
     print("[Backtest Analysis Tool]")
     print("=" * 80)
-    
+
     settings = get_settings()
-    
+
     try:
         quote_client = MoomooOpenDClient(
-            host=settings.opend_host, 
-            port=settings.opend_port
+            host=settings.opend_host, port=settings.opend_port
         )
     except Exception as e:
         print(f"[ERROR] OpenD connection error: {e}")
         print("Running in demo mode...")
         quote_client = None
-    
+
     print(f"\n[Capital] {settings.initial_capital:,.0f} {settings.capital_currency}")
     print(f"[Symbols] {len(settings.symbol_list)}")
     print(f"[Benchmark] {settings.benchmark_symbol}")
-    
+
     # Test parameter sets
     test_configs = [
         # Default (monthly momentum)
-        {"lookback_days": 252, "trend_days": 252, "top_n":1, "skip_days": 21, "min_hold_days": 0},
-        
+        {
+            "lookback_days": 252,
+            "trend_days": 252,
+            "top_n": 1,
+            "skip_days": 21,
+            "min_hold_days": 0,
+        },
         # More conservative
-        {"lookback_days": 252, "trend_days": 252, "top_n":1, "skip_days": 21, "min_hold_days": 21},
-        
+        {
+            "lookback_days": 252,
+            "trend_days": 252,
+            "top_n": 1,
+            "skip_days": 21,
+            "min_hold_days": 21,
+        },
         # More aggressive
-        {"lookback_days": 126, "trend_days": 126, "top_n": 2, "skip_days": 0, "min_hold_days": 0},
-        
+        {
+            "lookback_days": 126,
+            "trend_days": 126,
+            "top_n": 2,
+            "skip_days": 0,
+            "min_hold_days": 0,
+        },
         # High volatility focus
-        {"lookback_days": 63, "trend_days": 126, "top_n": 3, "skip_days": 21, "min_hold_days": 0},
+        {
+            "lookback_days": 63,
+            "trend_days": 126,
+            "top_n": 3,
+            "skip_days": 21,
+            "min_hold_days": 0,
+        },
     ]
-    
+
     print(f"\n[Test Configurations] {len(test_configs)}")
     print("Running backtests...\n")
-    
+
     results = []
     for i, config in enumerate(test_configs, 1):
         print(f"[{i}/{len(test_configs)}] Testing... ", end="", flush=True)
-        
+
         try:
             result = backtest_with_config(
                 quote_client if quote_client else None,
@@ -158,54 +180,66 @@ def main():
             print("[OK]")
         except Exception as e:
             print(f"[ERROR] {e}")
-    
+
     if not results:
         raise RuntimeError("No backtest results were produced")
 
     # 結果集計
     df = format_results(results)
     df = df.sort_values("annual_return", ascending=False)
-    
+
     print("\n" + "=" * 80)
     print("[Backtest Results (Sorted by Annual Return)]")
     print("=" * 80)
     print(df.to_string(index=False))
-    
+
     # ベスト設定の推奨
     print("\n" + "=" * 80)
     print("[Recommended Best Configurations]")
     print("=" * 80)
-    
+
     best_sharpe = df.iloc[df["sharpe"].idxmax()]
     best_return = df.iloc[df["annual_return"].idxmax()]
     best_dd = df.iloc[df["max_dd"].idxmin()]
-    
-    print(f"\n[Highest Sharpe Ratio]:")
-    print(f"  lookback={best_sharpe['lookback']}, trend={best_sharpe['trend']}, "
-          f"top_n={best_sharpe['top_n']}, skip={best_sharpe['skip']}")
-    print(f"  Annual Return: {best_sharpe['annual_return']:.2%}, "
-          f"Sharpe: {best_sharpe['sharpe']:.2f}, "
-          f"Max DD: {best_sharpe['max_dd']:.2%}")
-    
-    print(f"\n[Highest Annual Return]:")
-    print(f"  lookback={best_return['lookback']}, trend={best_return['trend']}, "
-          f"top_n={best_return['top_n']}, skip={best_return['skip']}")
-    print(f"  Annual Return: {best_return['annual_return']:.2%}, "
-          f"Sharpe: {best_return['sharpe']:.2f}, "
-          f"Max DD: {best_return['max_dd']:.2%}")
-    
-    print(f"\n[Lowest Max Drawdown]:")
-    print(f"  lookback={best_dd['lookback']}, trend={best_dd['trend']}, "
-          f"top_n={best_dd['top_n']}, skip={best_dd['skip']}")
-    print(f"  Annual Return: {best_dd['annual_return']:.2%}, "
-          f"Sharpe: {best_dd['sharpe']:.2f}, "
-          f"Max DD: {best_dd['max_dd']:.2%}")
-    
+
+    print("\n[Highest Sharpe Ratio]:")
+    print(
+        f"  lookback={best_sharpe['lookback']}, trend={best_sharpe['trend']}, "
+        f"top_n={best_sharpe['top_n']}, skip={best_sharpe['skip']}"
+    )
+    print(
+        f"  Annual Return: {best_sharpe['annual_return']:.2%}, "
+        f"Sharpe: {best_sharpe['sharpe']:.2f}, "
+        f"Max DD: {best_sharpe['max_dd']:.2%}"
+    )
+
+    print("\n[Highest Annual Return]:")
+    print(
+        f"  lookback={best_return['lookback']}, trend={best_return['trend']}, "
+        f"top_n={best_return['top_n']}, skip={best_return['skip']}"
+    )
+    print(
+        f"  Annual Return: {best_return['annual_return']:.2%}, "
+        f"Sharpe: {best_return['sharpe']:.2f}, "
+        f"Max DD: {best_return['max_dd']:.2%}"
+    )
+
+    print("\n[Lowest Max Drawdown]:")
+    print(
+        f"  lookback={best_dd['lookback']}, trend={best_dd['trend']}, "
+        f"top_n={best_dd['top_n']}, skip={best_dd['skip']}"
+    )
+    print(
+        f"  Annual Return: {best_dd['annual_return']:.2%}, "
+        f"Sharpe: {best_dd['sharpe']:.2f}, "
+        f"Max DD: {best_dd['max_dd']:.2%}"
+    )
+
     # Save results
     output_path = Path("backtest_results.csv")
     df.to_csv(output_path, index=False)
     print(f"\n[Saved] {output_path}")
-    
+
     # Parameter tuning guide
     print("\n" + "=" * 80)
     print("[Parameter Tuning Guide]")
@@ -244,10 +278,10 @@ def main():
 - take_profit_pct: 個別銘柄のテイクプロフィット（デフォルト: 0.20 = 20%）
 - daily_loss_limit_pct: 日次損失制限（デフォルト: 0.05 = 5%）
     """)
-    
+
     if quote_client is not None:
         quote_client.close()
-    
+
     print("\n[Done] Backtest analysis complete")
 
 

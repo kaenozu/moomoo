@@ -200,11 +200,11 @@ def calculate_volatility_scalar(
         return 1.0
 
     returns = prices.pct_change().dropna().iloc[-lookback:]
-    if returns.empty:
+    if len(returns) < 2:
         return 1.0
 
     realized_vol = returns.std() * (252**0.5)
-    if realized_vol <= 0.0:
+    if pd.isna(realized_vol) or realized_vol <= 0.0:
         return 1.0
 
     scalar = target_vol / realized_vol

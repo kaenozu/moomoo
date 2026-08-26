@@ -82,8 +82,7 @@ class StateStore(_QueryMixin, _LedgerMixin):
         )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
-        self._write_lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ensure_tables()
 
     def __enter__(self):
@@ -97,7 +96,9 @@ class StateStore(_QueryMixin, _LedgerMixin):
     def _connect(self) -> sqlite3.Connection:
         with self._lock:
             if self._conn is None:
-                self._conn = sqlite3.connect(str(self.db_path), timeout=10)
+                self._conn = sqlite3.connect(
+                    str(self.db_path), timeout=10, check_same_thread=False
+                )
                 self._conn.row_factory = sqlite3.Row
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA wal_autocheckpoint=1000")
@@ -116,7 +117,8 @@ class StateStore(_QueryMixin, _LedgerMixin):
 
     def load_risk_state(self) -> PersistentRiskState:
         conn = self._connect()
-        row = conn.execute("SELECT * FROM risk_state WHERE id = 1").fetchone()
+        with self._lock:
+            row = conn.execute("SELECT * FROM risk_state WHERE id = 1").fetchone()
         if row is None:
             return PersistentRiskState()
         return PersistentRiskState(
@@ -134,34 +136,39 @@ class StateStore(_QueryMixin, _LedgerMixin):
     def save_risk_state(self, state: PersistentRiskState) -> None:
         now = _utc_now_iso()
         conn = self._connect()
-        with self._write_lock:
-            conn.execute(
-                """
-                UPDATE risk_state SET
-                    peak_account_value = ?,
-                    halted = ?,
-                    halted_reason = ?,
-                    drawdown_tier = ?,
-                    daily_order_count = ?,
-                    daily_order_date = ?,
-                    last_equity_value = ?,
-                    rule_violation_count = ?,
-                    updated_at = ?
-                WHERE id = 1
-            """,
-                (
-                    state.peak_account_value,
-                    int(state.halted),
-                    state.halted_reason,
-                    state.drawdown_tier,
-                    state.daily_order_count,
-                    state.daily_order_date,
-                    state.last_equity_value,
-                    state.rule_violation_count,
-                    now,
-                ),
-            )
-            conn.commit()
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    UPDATE risk_state SET
+                        peak_account_value = ?,
+                        halted = ?,
+                        halted_reason = ?,
+                        drawdown_tier = ?,
+                        daily_order_count = ?,
+                        daily_order_date = ?,
+                        last_equity_value = ?,
+                        rule_violation_count = ?,
+                        updated_at = ?
+                    WHERE id = 1
+                """,
+                    (
+                        state.peak_account_value,
+                        int(state.halted),
+                        state.halted_reason,
+                        state.drawdown_tier,
+                        state.daily_order_count,
+                        state.daily_order_date,
+                        state.last_equity_value,
+                        state.rule_violation_count,
+                        now,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # --- Orders ---
 
@@ -171,50 +178,61 @@ class StateStore(_QueryMixin, _LedgerMixin):
         filled_at = record.filled_at
         if filled_at is None and _is_final_order_status(normalized_status):
             filled_at = _utc_now_iso()
-        order_id = (
-            None if record.order_id is None else str(record.order_id).strip() or None
-        )
-        with self._write_lock:
-            cursor = conn.execute(
-                """
-                INSERT INTO order_history
+
+        # order_id must be non-empty string; empty/None become rejecting
+        raw_order_id = record.order_id
+        if raw_order_id is None:
+            raise ValueError("order_id is required when recording an order")
+        order_id_text = str(raw_order_id).strip()
+        if not order_id_text:
+            raise ValueError("order_id cannot be empty")
+
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    INSERT INTO order_history
+                        (
+                            order_id,
+                            symbol,
+                            side,
+                            quantity,
+                            price,
+                            status,
+                            reason,
+                            filled_quantity,
+                            submitted_at,
+                            filled_at,
+                            broker_accepted_price,
+                            avg_fill_price,
+                            cumulative_fee_amount,
+                            cumulative_slippage_amount
+                        )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                     (
-                        order_id,
-                        symbol,
-                        side,
-                        quantity,
-                        price,
-                        status,
-                        reason,
-                        filled_quantity,
-                        submitted_at,
+                        order_id_text,
+                        record.symbol,
+                        record.side,
+                        record.quantity,
+                        record.price,
+                        normalized_status,
+                        record.reason,
+                        record.filled_quantity,
+                        record.submitted_at or _utc_now_iso(),
                         filled_at,
-                        broker_accepted_price,
-                        avg_fill_price,
-                        cumulative_fee_amount,
-                        cumulative_slippage_amount
-                    )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    order_id,
-                    record.symbol,
-                    record.side,
-                    record.quantity,
-                    record.price,
-                    normalized_status,
-                    record.reason,
-                    record.filled_quantity,
-                    record.submitted_at or _utc_now_iso(),
-                    filled_at,
-                    record.broker_accepted_price,
-                    record.avg_fill_price,
-                    record.cumulative_fee_amount,
-                    record.cumulative_slippage_amount,
-                ),
-            )
-            conn.commit()
-            return cursor.lastrowid
+                        record.broker_accepted_price,
+                        record.avg_fill_price,
+                        record.cumulative_fee_amount,
+                        record.cumulative_slippage_amount,
+                    ),
+                )
+                conn.commit()
+                return cursor.lastrowid
+            except Exception:
+                conn.rollback()
+                raise
 
     def update_order_status(
         self,
@@ -230,8 +248,10 @@ class StateStore(_QueryMixin, _LedgerMixin):
         normalized_status = _normalize_order_status(status)
         if not normalized_status:
             return
-        with self._write_lock:
+
+        with self._lock:
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 order_row = conn.execute(
                     "SELECT * FROM order_history WHERE order_id = ? ORDER BY id DESC LIMIT 1",
                     (str(order_id),),
@@ -341,6 +361,29 @@ class StateStore(_QueryMixin, _LedgerMixin):
                 conn.rollback()
                 raise
 
+    def update_order_id(self, old_order_id: str, new_order_id: str) -> None:
+        """Replace a temporary internal order_id with the actual broker order_id."""
+        if not old_order_id or not new_order_id:
+            raise ValueError(
+                "old_order_id and new_order_id must both be non-empty strings"
+            )
+        conn = self._connect()
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "UPDATE order_history SET order_id = ? WHERE order_id = ?",
+                    (str(new_order_id), str(old_order_id)),
+                )
+                conn.execute(
+                    "UPDATE execution_fill_ledger SET order_id = ? WHERE order_id = ?",
+                    (str(new_order_id), str(old_order_id)),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
     # --- Equity Curve ---
 
     def record_equity(
@@ -351,21 +394,27 @@ class StateStore(_QueryMixin, _LedgerMixin):
         market_date: str | None = None,
     ) -> None:
         conn = self._connect()
-        with self._write_lock:
-            conn.execute(
-                """
-                INSERT INTO equity_curve (timestamp, account_value, cash, positions_json, market_date)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                (
-                    _utc_now_iso(),
-                    account_value,
-                    cash,
-                    json.dumps(positions),
-                    market_date,
-                ),
-            )
-            conn.commit()
+        now = _utc_now_iso()
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO equity_curve (timestamp, account_value, cash, positions_json, market_date)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (
+                        now,
+                        account_value,
+                        cash,
+                        json.dumps(positions),
+                        market_date,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # --- Position Log ---
 
@@ -374,26 +423,36 @@ class StateStore(_QueryMixin, _LedgerMixin):
     ) -> None:
         conn = self._connect()
         now = _utc_now_iso()
-        with self._write_lock:
-            for symbol, qty in positions.items():
-                price = prices.get(symbol, 0.0)
-                conn.execute(
-                    """
-                    INSERT INTO position_log (timestamp, symbol, quantity, price, value)
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (now, symbol, qty, price, qty * price),
-                )
-            conn.commit()
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                for symbol, qty in positions.items():
+                    price = prices.get(symbol, 0.0)
+                    conn.execute(
+                        """
+                        INSERT INTO position_log (timestamp, symbol, quantity, price, value)
+                        VALUES (?, ?, ?, ?, ?)
+                    """,
+                        (now, symbol, qty, price, qty * price),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # --- Housekeeping ---
 
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         conn = self._connect()
-        with self._write_lock:
-            cursor = conn.execute(
-                "DELETE FROM equity_curve WHERE timestamp < datetime('now', ?)",
-                (f"-{keep_days} days",),
-            )
-            conn.commit()
-            return cursor.rowcount
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    "DELETE FROM equity_curve WHERE timestamp < datetime('now', ?)",
+                    (f"-{keep_days} days",),
+                )
+                conn.commit()
+                return cursor.rowcount
+            except Exception:
+                conn.rollback()
+                raise

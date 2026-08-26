@@ -253,10 +253,10 @@ def _apply_styles() -> None:
 
 
 def _reload_orchestrator_runtime():
-        from moomoo_bot.orchestrator import cycle as orchestrator_cycle
+    from moomoo_bot.orchestrator import cycle as orchestrator_cycle
 
-        importlib.reload(orchestrator_cycle)
-        return importlib.reload(orchestrator)
+    importlib.reload(orchestrator_cycle)
+    return importlib.reload(orchestrator)
 
 
 def _simulator_state_mtime_ns(path: Path) -> int | None:
@@ -349,9 +349,7 @@ def _price_history_frame(symbol: str) -> pd.DataFrame:
     if not isinstance(history, list) or not history:
         return pd.DataFrame(columns=["timestamp", "price"])
     frame = pd.DataFrame(history)
-    frame["timestamp"] = pd.to_datetime(
-        frame["timestamp"], format="mixed", utc=True
-    )
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], format="mixed", utc=True)
     return frame.sort_values("timestamp")
 
 
@@ -398,12 +396,19 @@ def _seed_price_history_if_needed(
         seeded_history.extend(existing_history)
 
     merged_history = {
-        str(entry["timestamp"]): {"timestamp": str(entry["timestamp"]), "price": float(entry["price"])}
+        str(entry["timestamp"]): {
+            "timestamp": str(entry["timestamp"]),
+            "price": float(entry["price"]),
+        }
         for entry in seeded_history
         if entry.get("timestamp") and entry.get("price") is not None
     }
-    ordered_history = sorted(merged_history.values(), key=lambda entry: entry["timestamp"])
-    st.session_state[_price_history_key(symbol)] = ordered_history[-PRICE_HISTORY_LIMIT:]
+    ordered_history = sorted(
+        merged_history.values(), key=lambda entry: entry["timestamp"]
+    )
+    st.session_state[_price_history_key(symbol)] = ordered_history[
+        -PRICE_HISTORY_LIMIT:
+    ]
     st.session_state[_price_history_seed_key(symbol)] = True
 
 
@@ -428,13 +433,13 @@ def _live_equity_frame() -> pd.DataFrame:
     if not isinstance(history, list) or not history:
         return pd.DataFrame(columns=["timestamp", "equity", "unrealized_pnl"])
     frame = pd.DataFrame(history)
-    frame["timestamp"] = pd.to_datetime(
-        frame["timestamp"], format="mixed", utc=True
-    )
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], format="mixed", utc=True)
     return frame.sort_values("timestamp")
 
 
-def _portfolio_snapshot(simulator: PaperSimulator, prices: dict[str, float]) -> dict[str, float]:
+def _portfolio_snapshot(
+    simulator: PaperSimulator, prices: dict[str, float]
+) -> dict[str, float]:
     market_value = 0.0
     unrealized_pnl = 0.0
     for symbol, position in simulator.positions.items():
@@ -480,15 +485,21 @@ def _build_execution_report(
         }
         for trade in new_trades
     ]
-    latest_snapshot = after_simulator.equity_curve[-1] if after_simulator.equity_curve else None
+    latest_snapshot = (
+        after_simulator.equity_curve[-1] if after_simulator.equity_curve else None
+    )
     return {
         "executed_at": datetime.now(timezone.utc).isoformat(),
         "trade_count": len(new_trades),
         "summary_lines": summary_lines,
         "rows": rows,
         "cash": after_simulator.cash,
-        "equity": latest_snapshot.equity if latest_snapshot is not None else after_simulator.cash,
-        "market_value": latest_snapshot.market_value if latest_snapshot is not None else 0.0,
+        "equity": latest_snapshot.equity
+        if latest_snapshot is not None
+        else after_simulator.cash,
+        "market_value": latest_snapshot.market_value
+        if latest_snapshot is not None
+        else 0.0,
         "unrealized_pnl": (
             latest_snapshot.unrealized_pnl if latest_snapshot is not None else 0.0
         ),
@@ -503,7 +514,9 @@ def _run_strategy_from_ui(
 ) -> dict[str, object]:
     state_path = Path(state_path_text)
     state_db_path = state_path.with_suffix(".db")
-    before_simulator = PaperSimulator.load(state_path=state_path, initial_cash=initial_cash)
+    before_simulator = PaperSimulator.load(
+        state_path=state_path, initial_cash=initial_cash
+    )
     before_trade_count = len(before_simulator.trades)
 
     # Streamlit keeps imported modules cached across reruns, so refresh the
@@ -525,7 +538,9 @@ def _run_strategy_from_ui(
         local_sim_state_db_path=state_db_path,
     )
 
-    after_simulator = PaperSimulator.load(state_path=state_path, initial_cash=initial_cash)
+    after_simulator = PaperSimulator.load(
+        state_path=state_path, initial_cash=initial_cash
+    )
     return _build_execution_report(before_trade_count, after_simulator)
 
 
@@ -683,7 +698,10 @@ def _current_prices_for_symbols(
         else:
             st.info(f"OpenD価格更新に失敗したため前回値を維持します: {exc}")
         st.session_state["price_map"] = fallback_prices
-        timestamp = st.session_state.get("price_refreshed_at") or datetime.now(timezone.utc).isoformat()
+        timestamp = (
+            st.session_state.get("price_refreshed_at")
+            or datetime.now(timezone.utc).isoformat()
+        )
         for symbol, price in fallback_prices.items():
             _append_price_history(symbol, timestamp, price)
         return fallback_prices, timestamp
@@ -699,7 +717,9 @@ def _render_symbol_detail(
     opend_port: int,
 ) -> None:
     position = simulator.positions.get(selected_symbol)
-    live_price = float(prices.get(selected_symbol, position.avg_cost if position else 0.0))
+    live_price = float(
+        prices.get(selected_symbol, position.avg_cost if position else 0.0)
+    )
     if position is None:
         quantity = 0.0
         avg_cost = live_price
@@ -731,11 +751,18 @@ def _render_symbol_detail(
             st.info("まだチャートデータがありません。数秒待つと自動で蓄積されます。")
         else:
             chart_frame["avg_cost"] = avg_cost
-            st.line_chart(chart_frame.set_index("timestamp")[ ["price", "avg_cost"] ], width="stretch")
+            st.line_chart(
+                chart_frame.set_index("timestamp")[["price", "avg_cost"]],
+                width="stretch",
+            )
 
     st.divider()
     st.subheader("他の保有銘柄")
-    other_symbols = [symbol for symbol in watch_symbols if symbol != selected_symbol and symbol in simulator.positions]
+    other_symbols = [
+        symbol
+        for symbol in watch_symbols
+        if symbol != selected_symbol and symbol in simulator.positions
+    ]
     if not other_symbols:
         st.info("他の保有銘柄はありません。")
     else:
@@ -808,7 +835,9 @@ def _render_live_workspace(
         )
     )
 
-    prices, refresh_at = _current_prices_for_symbols(watch_symbols, opend_host, opend_port)
+    prices, refresh_at = _current_prices_for_symbols(
+        watch_symbols, opend_host, opend_port
+    )
     live_snapshot = _portfolio_snapshot(simulator, prices)
     _append_live_equity(
         refresh_at,
@@ -845,7 +874,11 @@ def _render_live_workspace(
         )
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("🔄 今すぐ市場価格を更新", width="stretch", key="refresh-market-secondary"):
+            if st.button(
+                "🔄 今すぐ市場価格を更新",
+                width="stretch",
+                key="refresh-market-secondary",
+            ):
                 try:
                     prices, refresh_at = _refresh_market_prices(
                         watch_symbols,
@@ -878,8 +911,12 @@ def _render_live_workspace(
                 quantity = st.number_input("数量 (株)", min_value=1, value=1, step=1)
             with form_col4:
                 default_price = float(prices.get(symbol, 100.0))
-                price = st.number_input("価格 (USD)", min_value=0.01, value=default_price, step=0.01)
-            st.caption("⚠️ 価格は銘柄変更時に自動更新されません。注文前に確認してください。")
+                price = st.number_input(
+                    "価格 (USD)", min_value=0.01, value=default_price, step=0.01
+                )
+            st.caption(
+                "⚠️ 価格は銘柄変更時に自動更新されません。注文前に確認してください。"
+            )
             submit = st.form_submit_button("✅ 成行注文を発注", width="stretch")
 
         if submit:
@@ -901,7 +938,9 @@ def _render_live_workspace(
 
     with right:
         st.subheader("📸 スナップショット")
-        st.markdown("現在の価格で評価額を更新し、画面上の損益をリアルタイムで追跡します。")
+        st.markdown(
+            "現在の価格で評価額を更新し、画面上の損益をリアルタイムで追跡します。"
+        )
         if st.button("現在評価を記録", type="primary", width="stretch"):
             simulator.mark_to_market(prices)
             simulator.save()
@@ -917,7 +956,9 @@ def _render_live_workspace(
             "4. 注文後はポートフォリオと取引履歴が自動で追従します"
         )
 
-    tab_portfolio, tab_trades, tab_equity = st.tabs(["📂 ポートフォリオ", "📋 取引履歴", "📉 損益曲線"])
+    tab_portfolio, tab_trades, tab_equity = st.tabs(
+        ["📂 ポートフォリオ", "📋 取引履歴", "📉 損益曲線"]
+    )
 
     with tab_portfolio:
         positions_df = _positions_df(simulator, prices)
@@ -940,7 +981,9 @@ def _render_live_workspace(
         live_equity_df = _live_equity_frame()
         stored_equity_df = _equity_df(simulator)
         if live_equity_df.empty and stored_equity_df.empty:
-            st.info("スナップショットがありません。「現在評価を記録」をクリックしてください。")
+            st.info(
+                "スナップショットがありません。「現在評価を記録」をクリックしてください。"
+            )
         else:
             equity_chart_frame, pnl_chart_frame = _equity_chart_frames(
                 live_equity_df,
@@ -966,7 +1009,9 @@ def main() -> None:
     _apply_styles()
 
     st.title("📈 ペーパートレード スタジオ")
-    st.caption("ローカル約定シミュレータ。価格表示とポートフォリオ表示は OpenD スナップショットで5秒ごとに更新されます。")
+    st.caption(
+        "ローカル約定シミュレータ。価格表示とポートフォリオ表示は OpenD スナップショットで5秒ごとに更新されます。"
+    )
     st.markdown(
         "<div class='app-note'>💡 価格はOpenDのスナップショットを参照します。注文価格はチケットで上書き可能です。</div>",
         unsafe_allow_html=True,
@@ -1001,15 +1046,21 @@ def main() -> None:
         st.caption(f"自動更新: {AUTO_REFRESH_SECONDS}秒ごと")
         st.caption("ポートフォリオの銘柄はチャートボタンから別ページ風に開けます。")
         if st.button("シミュレーターをリセット", type="secondary", width="stretch"):
-            sim = PaperSimulator.load(Path(state_path_text), initial_cash=float(initial_cash))
+            sim = PaperSimulator.load(
+                Path(state_path_text), initial_cash=float(initial_cash)
+            )
             sim.reset(initial_cash=float(initial_cash))
             st.session_state["simulator"] = sim
             st.success("シミュレーターをリセットしました。")
 
         st.divider()
         st.subheader("🚀 戦略実行")
-        st.caption("run-paper-trade.bat と同じ既定値で、ローカルシミュレータに反映します。")
-        execute_strategy = st.button("run-paper-trade を実行", type="primary", width="stretch")
+        st.caption(
+            "run-paper-trade.bat と同じ既定値で、ローカルシミュレータに反映します。"
+        )
+        execute_strategy = st.button(
+            "run-paper-trade を実行", type="primary", width="stretch"
+        )
 
         if execute_strategy:
             with st.spinner("run-paper-trade 相当の戦略を実行中..."):

@@ -27,14 +27,20 @@ def test_search_ranks_stronger_momentum_configuration_first() -> None:
         },
         index=index,
     )
-    benchmark = pd.Series([100 + i * 0.2 for i in range(120)], index=index, name="benchmark")
+    benchmark = pd.Series(
+        [100 + i * 0.2 for i in range(120)], index=index, name="benchmark"
+    )
 
     results = search_momentum_candidates(
         prices,
         benchmark,
         configs=[
-            MonthlyMomentumRotationConfig(lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5),
-            MonthlyMomentumRotationConfig(lookback_days=20, trend_days=20, top_n=2, skip_days=5, rebalance_days=5),
+            MonthlyMomentumRotationConfig(
+                lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5
+            ),
+            MonthlyMomentumRotationConfig(
+                lookback_days=20, trend_days=20, top_n=2, skip_days=5, rebalance_days=5
+            ),
         ],
         split_ratio=0.7,
     )
@@ -167,13 +173,17 @@ def test_search_satellite_candidates_ranks_full_allocation_first() -> None:
         },
         index=index,
     )
-    benchmark = pd.Series([100 + i * 0.5 for i in range(140)], index=index, name="benchmark")
+    benchmark = pd.Series(
+        [100 + i * 0.5 for i in range(140)], index=index, name="benchmark"
+    )
 
     results = search_satellite_candidates(
         prices,
         benchmark,
         configs=[
-            MonthlyMomentumRotationConfig(lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5),
+            MonthlyMomentumRotationConfig(
+                lookback_days=20, trend_days=20, top_n=1, skip_days=5, rebalance_days=5
+            ),
         ],
         satellite_weights=[0.0, 0.5, 1.0],
         split_ratio=0.7,
@@ -182,7 +192,9 @@ def test_search_satellite_candidates_ranks_full_allocation_first() -> None:
     assert results[0].satellite_weight == 1.0
 
     core_only = next(result for result in results if result.satellite_weight == 0.0)
-    full_allocation = next(result for result in results if result.satellite_weight == 1.0)
+    full_allocation = next(
+        result for result in results if result.satellite_weight == 1.0
+    )
 
     assert core_only.full_excess == pytest.approx(0.0)
     assert full_allocation.full_excess > core_only.full_excess

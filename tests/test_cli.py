@@ -27,7 +27,9 @@ def test_cli_module_imports_without_circular_dependency() -> None:
 
 
 def test_auto_run_delegates_to_orchestrator(monkeypatch) -> None:
-    settings = Settings(symbols="US.AAPL,US.MSFT", benchmark_symbol="US.VT", execution_mode="paper")
+    settings = Settings(
+        symbols="US.AAPL,US.MSFT", benchmark_symbol="US.VT", execution_mode="paper"
+    )
     calls: list[dict] = []
 
     def fake_run_auto_monitor(**kwargs):
@@ -94,15 +96,24 @@ def test_autopilot_delegates_to_orchestrator_with_env_defaults(monkeypatch) -> N
 
 
 def test_autopilot_requires_paper_mode(monkeypatch) -> None:
-    settings = Settings(symbols="US.AAPL", benchmark_symbol="US.VT", execution_mode="live")
+    settings = Settings(
+        symbols="US.AAPL", benchmark_symbol="US.VT", execution_mode="live"
+    )
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
 
-    with pytest.raises(typer.BadParameter, match="requires MOOMOO_BOT_EXECUTION_MODE=paper"):
+    with pytest.raises(
+        typer.BadParameter, match="requires MOOMOO_BOT_EXECUTION_MODE=paper"
+    ):
         cli.autopilot()
 
 
 def test_live_trade_requires_explicit_confirmation(monkeypatch) -> None:
-    settings = Settings(symbols="US.AAPL", benchmark_symbol="US.VT", execution_mode="live", allow_live_trading=True)
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="live",
+        allow_live_trading=True,
+    )
 
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
 
@@ -119,7 +130,12 @@ def test_live_trade_requires_explicit_confirmation(monkeypatch) -> None:
 
 
 def test_live_trade_delegates_to_orchestrator_with_real_env(monkeypatch) -> None:
-    settings = Settings(symbols="US.AAPL", benchmark_symbol="US.VT", execution_mode="live", allow_live_trading=True)
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="live",
+        allow_live_trading=True,
+    )
     calls: list[dict] = []
 
     def fake_run_one_shot_trade(**kwargs):
@@ -195,7 +211,9 @@ def test_paper_repair_delegates_to_orchestrator(monkeypatch) -> None:
     assert calls[0]["clear_local_state"] is True
 
 
-def test_paper_run_delegates_to_orchestrator_with_submit_orders_false(monkeypatch) -> None:
+def test_paper_run_delegates_to_orchestrator_with_submit_orders_false(
+    monkeypatch,
+) -> None:
     settings = Settings(
         symbols="US.AAPL",
         benchmark_symbol="US.VT",
@@ -306,7 +324,9 @@ def test_execution_report_loads_state_and_renders_audit(monkeypatch) -> None:
         def close(self) -> None:
             captured["closed"] = True
 
-    def fake_render(summary, recent_fills, recent_realizations, recent_orders, symbol_label):
+    def fake_render(
+        summary, recent_fills, recent_realizations, recent_orders, symbol_label
+    ):
         captured["rendered"] = {
             "summary": summary,
             "recent_fills": recent_fills,

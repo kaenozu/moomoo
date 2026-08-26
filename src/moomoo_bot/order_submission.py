@@ -8,6 +8,7 @@ Related: cli_helpers.py, broker/paper.py, orchestrator.py, state.py.
 """
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from moomoo import TrdSide
@@ -106,47 +107,242 @@ def _unsupported_order_reason(instruction) -> str | None:
 def _submit_single_order(
     *, trade_client, instruction, render_func, state_store, mode_label: str
 ) -> int:
+    pending_internal_id = _record_pending_submission(state_store, instruction)
+
     try:
         response = trade_client.submit_order(instruction)
         render_func(instruction, response)
         if state_store is not None:
             order_record = _build_order_record(trade_client, instruction, response)
             if order_record is not None:
+                _update_pending_order_id(
+                    state_store,
+                    pending_internal_id,
+                    str(order_record.order_id),
+                )
                 _persist_order_and_immediate_fill(
                     state_store,
                     order_record,
                     response,
+                    already_in_db=(pending_internal_id is not None),
                 )
         return 1
     except Exception as exc:
-        if isinstance(exc, OrderTimeoutError):
-            logger.warning(
-                "Order timed out, checking for existing order",
-                extra={"symbol": instruction.symbol, "error": str(exc)},
-            )
-            # 注文の照会を行い、既存の注文があればそれを反映する
-            matching_order = get_matching_active_order(trade_client, instruction)
-            if matching_order:
-                logger.info(
-                    "Found existing order matching timed out request",
-                    extra={"symbol": instruction.symbol, "matching_order": matching_order},
-                )
-                return 1
-            logger.warning("No existing order found after timeout, submission failed.", extra={"symbol": instruction.symbol})
-            return 0
-        elif _is_rejected_order_error(exc):
-            from moomoo_bot.cli_render import console
+        return _handle_submission_exception(
+            exc=exc,
+            trade_client=trade_client,
+            instruction=instruction,
+            state_store=state_store,
+            pending_internal_id=pending_internal_id,
+            mode_label=mode_label,
+        )
 
-            console.print(
-                f"Skipping {mode_label} order for {instruction.symbol}: {exc}"
-            )
-            return 0
-        elif isinstance(exc, (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError)):
-            logger.warning("Order submission failed: %s", exc)
-            return 0
-        else:
-            logger.warning("Order submission failed: %s", exc)
-            raise
+
+def _record_pending_submission(state_store, instruction) -> str | None:
+    if state_store is None:
+        return None
+
+    pending_internal_id = f"internal_{uuid.uuid4().hex[:8]}"
+    state_store.record_order(
+        _build_pending_order_record(pending_internal_id, instruction)
+    )
+    return pending_internal_id
+
+
+def _build_pending_order_record(order_id: str, instruction) -> OrderRecord:
+    return OrderRecord(
+        order_id=order_id,
+        symbol=instruction.symbol,
+        side=str(instruction.side),
+        quantity=float(instruction.quantity),
+        price=float(instruction.price),
+        status="submitting",
+        reason=instruction.reason,
+        filled_quantity=0.0,
+    )
+
+
+def _update_pending_order_id(
+    state_store, pending_internal_id: str | None, order_id: str
+) -> None:
+    if state_store is None or pending_internal_id is None:
+        return
+
+    update_order_id = getattr(state_store, "update_order_id", None)
+    if callable(update_order_id):
+        update_order_id(pending_internal_id, order_id)
+
+
+def _handle_submission_exception(
+    *,
+    exc: Exception,
+    trade_client,
+    instruction,
+    state_store,
+    pending_internal_id: str | None,
+    mode_label: str,
+) -> int:
+    if isinstance(exc, OrderTimeoutError):
+        return _handle_submission_timeout(
+            trade_client=trade_client,
+            instruction=instruction,
+            state_store=state_store,
+            pending_internal_id=pending_internal_id,
+            exc=exc,
+        )
+
+    _mark_pending_order_failed(state_store, pending_internal_id)
+    if _is_rejected_order_error(exc):
+        from moomoo_bot.cli_render import console
+
+        console.print(f"Skipping {mode_label} order for {instruction.symbol}: {exc}")
+        return 0
+
+    logger.warning("Order submission failed: %s", exc)
+    if isinstance(
+        exc,
+        (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError),
+    ):
+        return 0
+    raise
+
+
+def _handle_submission_timeout(
+    *,
+    trade_client,
+    instruction,
+    state_store,
+    pending_internal_id: str | None,
+    exc: Exception,
+) -> int:
+    logger.warning(
+        "Order timed out, checking for existing order",
+        extra={"symbol": instruction.symbol, "error": str(exc)},
+    )
+    matching_order = get_matching_active_order(trade_client, instruction)
+    if matching_order:
+        logger.info(
+            "Found existing order matching timed out request",
+            extra={"symbol": instruction.symbol, "matching_order": matching_order},
+        )
+        _sync_state_order_from_broker_match(
+            state_store,
+            pending_internal_id,
+            instruction,
+            matching_order,
+        )
+        return 1
+
+    _mark_pending_order_failed(state_store, pending_internal_id)
+    logger.warning(
+        "No existing order found after timeout, submission failed.",
+        extra={"symbol": instruction.symbol},
+    )
+    return 0
+
+
+def _mark_pending_order_failed(state_store, pending_internal_id: str | None) -> None:
+    if state_store is None or pending_internal_id is None:
+        return
+
+    update_order_status = getattr(state_store, "update_order_status", None)
+    if callable(update_order_status):
+        update_order_status(pending_internal_id, "failed", 0.0)
+
+
+def _sync_state_order_from_broker_match(
+    state_store,
+    pending_internal_id: str | None,
+    instruction,
+    matching_order: dict[str, object],
+) -> None:
+    if state_store is None:
+        return
+
+    broker_order_id = (
+        matching_order.get("order_id")
+        or matching_order.get("orderid")
+        or matching_order.get("id")
+    )
+    resolved_order_id = (
+        str(broker_order_id).strip() if broker_order_id is not None else ""
+    )
+    effective_order_id = resolved_order_id or pending_internal_id
+    if not effective_order_id:
+        return
+
+    if pending_internal_id is not None and resolved_order_id:
+        update_order_id = getattr(state_store, "update_order_id", None)
+        if callable(update_order_id):
+            update_order_id(pending_internal_id, resolved_order_id)
+
+    update_order_status = getattr(state_store, "update_order_status", None)
+    if not callable(update_order_status):
+        return
+
+    broker_status = (
+        matching_order.get("order_status")
+        or matching_order.get("status")
+        or "submitted"
+    )
+    filled_quantity = matching_order.get("filled_quantity")
+    if filled_quantity is None:
+        filled_quantity = (
+            matching_order.get("filled_qty")
+            or matching_order.get("dealt_qty")
+            or matching_order.get("deal_qty")
+            or 0.0
+        )
+
+    update_order_status(
+        str(effective_order_id),
+        str(broker_status),
+        float(filled_quantity or 0.0),
+        fill_price=_coerce_optional_float(
+            matching_order.get("avg_fill_price")
+            or matching_order.get("avg_price")
+            or matching_order.get("dealt_avg_price")
+            or matching_order.get("deal_avg_price")
+            or matching_order.get("fill_price")
+            or matching_order.get("dealt_price")
+        ),
+        broker_accepted_price=_coerce_optional_float(
+            matching_order.get("price")
+            or matching_order.get("order_price")
+            or matching_order.get("submitted_price")
+            or instruction.price
+        ),
+        fee_amount=_coerce_optional_float(
+            matching_order.get("fee_amount")
+            or matching_order.get("total_fee")
+            or matching_order.get("fee")
+            or matching_order.get("commission")
+            or matching_order.get("transaction_fee")
+        ),
+        filled_at=_coerce_optional_text(
+            matching_order.get("updated_time")
+            or matching_order.get("updated_at")
+            or matching_order.get("create_time")
+            or matching_order.get("created_at")
+            or matching_order.get("fill_time")
+        ),
+    )
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _is_rejected_order_error(exc: Exception) -> bool:
@@ -165,57 +361,69 @@ def _is_rejected_order_error(exc: Exception) -> bool:
     )
 
 
-def _persist_order_and_immediate_fill(state_store, order_record, response) -> None:
+def _persist_order_and_immediate_fill(
+    state_store, order_record, response, already_in_db: bool = False
+) -> None:
     update_order_status = getattr(state_store, "update_order_status", None)
     normalized_status = str(order_record.status or "").strip().lower().replace("-", "_")
     has_immediate_fill = float(order_record.filled_quantity or 0.0) > 0.0
 
-    if not callable(update_order_status) or not has_immediate_fill:
-        state_store.record_order(order_record)
+    if not callable(update_order_status):
+        if not already_in_db:
+            state_store.record_order(order_record)
         return
 
-    state_store.record_order(
-        OrderRecord(
-            order_id=order_record.order_id,
-            symbol=order_record.symbol,
-            side=order_record.side,
-            quantity=order_record.quantity,
-            price=order_record.price,
-            status="submitted",
-            reason=order_record.reason,
-            filled_quantity=0.0,
-            submitted_at=order_record.submitted_at,
+    if not already_in_db:
+        state_store.record_order(
+            OrderRecord(
+                order_id=order_record.order_id,
+                symbol=order_record.symbol,
+                side=order_record.side,
+                quantity=order_record.quantity,
+                price=order_record.price,
+                status="submitted",
+                reason=order_record.reason,
+                filled_quantity=0.0,
+                submitted_at=order_record.submitted_at,
+            )
         )
-    )
-    update_order_status(
-        str(order_record.order_id),
-        normalized_status,
-        float(order_record.filled_quantity or 0.0),
-        fill_price=_response_first_value(
-            response,
-            (
-                "avg_fill_price",
-                "avg_price",
-                "dealt_avg_price",
-                "deal_avg_price",
-                "fill_price",
-                "dealt_price",
-                "price",
+
+    if already_in_db or has_immediate_fill:
+        update_order_status(
+            str(order_record.order_id),
+            normalized_status,
+            float(order_record.filled_quantity or 0.0),
+            fill_price=_response_first_value(
+                response,
+                (
+                    "avg_fill_price",
+                    "avg_price",
+                    "dealt_avg_price",
+                    "deal_avg_price",
+                    "fill_price",
+                    "dealt_price",
+                    "price",
+                ),
             ),
-        ),
-        broker_accepted_price=_response_first_value(
-            response,
-            ("price", "order_price", "submitted_price"),
-        ),
-        fee_amount=_response_first_value(
-            response,
-            ("fee_amount", "total_fee", "fee", "commission", "transaction_fee"),
-        ),
-        filled_at=_response_first_value(
-            response,
-            ("updated_time", "updated_at", "create_time", "created_at", "fill_time"),
-        ),
-    )
+            broker_accepted_price=_response_first_value(
+                response,
+                ("price", "order_price", "submitted_price"),
+            ),
+            fee_amount=_response_first_value(
+                response,
+                ("fee_amount", "total_fee", "fee", "commission", "transaction_fee"),
+            ),
+            filled_at=_response_first_value(
+                response,
+                (
+                    "updated_time",
+                    "updated_at",
+                    "create_time",
+                    "created_at",
+                    "fill_time",
+                ),
+            ),
+        )
 
 
 def _build_order_record(trade_client, instruction, response):
@@ -323,6 +531,11 @@ def _find_matching_pending_state_order(state_store, instruction):
 
 
 def _is_recent_pending_order(submitted_at: object) -> bool:
+    """Check if a pending order was submitted within the duplicate guard window.
+
+    Handles timezone-naive timestamps by assuming UTC. Older systems may store
+    naive timestamps, so we normalize them to UTC for comparison.
+    """
     if not submitted_at:
         return False
 
@@ -335,6 +548,7 @@ def _is_recent_pending_order(submitted_at: object) -> bool:
     except ValueError:
         return False
 
+    # Normalize naive timestamps to UTC for consistent comparison
     if submitted_dt.tzinfo is None:
         submitted_dt = submitted_dt.replace(tzinfo=timezone.utc)
 

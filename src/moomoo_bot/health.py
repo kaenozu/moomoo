@@ -126,13 +126,24 @@ class HealthCheckServer:
             logger.warning("Health check server already running")
             return
 
+        host = os.getenv("MOOMOO_BOT_HEALTH_HOST", "127.0.0.1")
+        if host == "0.0.0.0" and not _HEALTH_AUTH_TOKEN:
+            logger.error(
+                "Refusing to bind to 0.0.0.0 without MOOMOO_BOT_HEALTH_TOKEN. "
+                "Set the token or bind to 127.0.0.1 for local-only access."
+            )
+            raise RuntimeError(
+                "Health check server requires MOOMOO_BOT_HEALTH_TOKEN when binding to all interfaces (0.0.0.0)"
+            )
+
         def handler(*args, **kwargs):
             return HealthRequestHandler(*args, status_getter=self._get_status, **kwargs)
 
-        self.server = HTTPServer(("127.0.0.1", self.port), handler)
+        logger.info("Starting health check server on %s:%d", host, self.port)
+        self.server = HTTPServer((host, self.port), handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        logger.info("Health check server started on port %d", self.port)
+        logger.info("Health check server started on %s:%d", host, self.port)
 
     def stop(self):
         """Stop the health check server."""

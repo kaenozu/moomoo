@@ -1,4 +1,5 @@
 """Analyze drawdown duration and recovery from verify-api backtest."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -28,7 +29,7 @@ def analyze_drawdown(equity_curve: pd.Series) -> dict:
 
     # Count all drawdowns > 10%
     significant_dd = drawdown[drawdown <= -0.10]
-    
+
     return {
         "max_drawdown": max_dd,
         "peak_date": peak_before_dd,
@@ -53,19 +54,29 @@ def main() -> None:
             include_benchmark_in_prices=requires_benchmark_prices(strategy),
         )
         result = run_backtest(price_frame, benchmark_series, strategy)
-        
+
         analysis = analyze_drawdown(result.equity_curve)
-        
+
         print("=" * 60)
         print("DRAWDOWN ANALYSIS")
         print("=" * 60)
         print(f"Max Drawdown:       {analysis['max_drawdown']:.2%}")
         print(f"Peak Date:          {analysis['peak_date'].date()}")
         print(f"Trough Date:        {analysis['trough_date'].date()}")
-        print(f"Recovery Date:      {analysis['recovery_date'].date() if analysis['recovery_date'] else 'Not recovered'}")
+        print(
+            f"Recovery Date:      {analysis['recovery_date'].date() if analysis['recovery_date'] else 'Not recovered'}"
+        )
         print(f"DD Duration:        {analysis['dd_duration_days']} days")
-        print(f"Recovery Duration:  {analysis['recovery_days']} days" if analysis['recovery_days'] else "Recovery Duration:  N/A")
-        print(f"Total (Peak->Recovery): {analysis['total_days']} days" if analysis['total_days'] else "Total: N/A")
+        print(
+            f"Recovery Duration:  {analysis['recovery_days']} days"
+            if analysis["recovery_days"]
+            else "Recovery Duration:  N/A"
+        )
+        print(
+            f"Total (Peak->Recovery): {analysis['total_days']} days"
+            if analysis["total_days"]
+            else "Total: N/A"
+        )
         print(f"Significant DDs (>10%): {analysis['significant_dd_count']}")
         print("=" * 60)
     finally:

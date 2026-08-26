@@ -8,17 +8,14 @@ import logging
 import sys
 from pathlib import Path
 
-
-import logging
-import sys
-from pathlib import Path
-
 # python-json-logger がインストールされていることを前提とし、利用可能なら使用する
 try:
     from pythonjsonlogger import jsonlogger
+
     HAS_JSON_LOGGER = True
 except ImportError:
     HAS_JSON_LOGGER = False
+
 
 def setup_logging(log_level: str = "INFO", log_file: Path | None = None) -> None:
     """Configure logging with console and optional file output.
@@ -39,7 +36,7 @@ def setup_logging(log_level: str = "INFO", log_file: Path | None = None) -> None
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    
+
     if HAS_JSON_LOGGER:
         formatter = jsonlogger.JsonFormatter(
             "%(asctime)s %(levelname)s %(name)s %(message)s"

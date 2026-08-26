@@ -21,13 +21,21 @@ from moomoo import (
     TrdMarket,
 )
 
-from moomoo_bot.exceptions import BrokerConnectionError, DataError, OrderRejectedError
+from moomoo_bot.exceptions import (
+    BrokerConnectionError,
+    DataError,
+    OrderRejectedError,
+    OrderTimeoutError,
+)
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.row_utils import position_quantities_from_frame
+from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 
-_START_MAX_RETRIES = 3
+# ``with_retries`` counts retries after the initial call. Keep three total
+# broker attempts, matching the previous paper-trading behavior.
+_START_MAX_RETRIES = 2
 _START_RETRY_DELAY_SECONDS = 2.0
 
 _ACTIVE_ORDER_STATUS_NAMES = frozenset(
@@ -91,7 +99,7 @@ class MoomooPaperTradeClient:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    def get_account_value(self) -> float:
+    def _account_info_row(self) -> tuple[pd.Series, str]:
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
         ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
@@ -103,9 +111,11 @@ class MoomooPaperTradeClient:
         if not isinstance(data, pd.DataFrame) or data.empty:
             mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
             raise DataError(f"{mode_name} account info did not return rows")
-
-        row = data.iloc[0]
         mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
+        return data.iloc[0], mode_name
+
+    def get_account_value(self) -> float:
+        row, mode_name = self._account_info_row()
         for field in ("total_assets", "power", "available_funds"):
             value = _positive_float(row.get(field))
             if value is not None:
@@ -113,19 +123,7 @@ class MoomooPaperTradeClient:
         raise DataError(f"{mode_name} account did not expose a positive account value")
 
     def get_buying_power(self) -> float:
-        if self.trade_context is None:
-            raise BrokerConnectionError("trade context is not initialized")
-        ret, data = self.trade_context.accinfo_query(trd_env=self.trd_env)
-        if ret != RET_OK:
-            mode_name = "live" if self.trd_env == TrdEnv.REAL else "simulated"
-            raise BrokerConnectionError(
-                f"Failed to fetch {mode_name} account info: {data}"
-            )
-        if not isinstance(data, pd.DataFrame) or data.empty:
-            mode_name = "Live" if self.trd_env == TrdEnv.REAL else "Simulated"
-            raise DataError(f"{mode_name} account info did not return rows")
-
-        row = data.iloc[0]
+        row, _mode_name = self._account_info_row()
         for field in (
             "available_funds",
             "power",
@@ -195,43 +193,43 @@ class MoomooPaperTradeClient:
         return None
 
     def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
+        """Submit an order with retry logic for transient failures."""
+        return self._submit_order_with_retry(instruction)
+
+    @with_retries(
+        max_retries=_START_MAX_RETRIES,
+        base_delay=_START_RETRY_DELAY_SECONDS,
+        exceptions=TRANSIENT_EXCEPTIONS,
+        raise_on_failure=OrderTimeoutError,
+    )
+    def _submit_order_with_retry(
+        self, instruction: PaperOrderInstruction
+    ) -> pd.DataFrame:
+        """Internal retry-wrapped order submission."""
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
-        
-        remark = (instruction.reason or "")[:64]
-        
-        # 注文送信のリトライ回数を設ける (通信失敗に対する最低限の保護)
-        for attempt in range(1, _START_MAX_RETRIES + 1):
-            try:
-                ret, data = self.trade_context.place_order(
-                    price=instruction.price,
-                    qty=instruction.quantity,
-                    code=instruction.symbol,
-                    trd_side=instruction.side,
-                    order_type=OrderType.NORMAL,
-                    trd_env=self.trd_env,
-                    remark=remark,
-                    session=instruction.session or Session.NONE,
-                    fill_outside_rth=instruction.fill_outside_rth,
-                )
-                if ret != RET_OK:
-                    mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
-                    raise OrderRejectedError(
-                        f"Failed to submit {mode_name} order for {instruction.symbol}: {data}"
-                    )
-                if not isinstance(data, pd.DataFrame) or data.empty:
-                    raise DataError(f"Broker order response invalid: {data}")
-                return data
-            except Exception as exc:
-                if isinstance(exc, OrderRejectedError):
-                    raise
-                if attempt >= _START_MAX_RETRIES:
-                    raise OrderTimeoutError(f"Order submission failed after {attempt} attempts: {exc}") from exc
-                logger.warning("Order submission attempt %d failed, retrying...", attempt)
-                sleep(_START_RETRY_DELAY_SECONDS)
-        
-        raise OrderTimeoutError("Unexpected end of retry loop")
 
+        remark = (instruction.reason or "")[:64]
+
+        ret, data = self.trade_context.place_order(
+            price=instruction.price,
+            qty=instruction.quantity,
+            code=instruction.symbol,
+            trd_side=instruction.side,
+            order_type=OrderType.NORMAL,
+            trd_env=self.trd_env,
+            remark=remark,
+            session=instruction.session or Session.NONE,
+            fill_outside_rth=instruction.fill_outside_rth,
+        )
+        if ret != RET_OK:
+            mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
+            raise OrderRejectedError(
+                f"Failed to submit {mode_name} order for {instruction.symbol}: {data}"
+            )
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            raise DataError(f"Broker order response invalid: {data}")
+        return data
 
 
 def _is_active_order_status(status: object) -> bool:

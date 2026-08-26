@@ -1,6 +1,7 @@
 """Paper trading allocation and order instruction module.
 
 Purpose: Build paper trade plan and convert decisions to order instructions.
+Why: Extracted from main trading flow for testability and reuse.
 Related: cli.py, strategy modules.
 """
 

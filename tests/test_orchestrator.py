@@ -12,7 +12,12 @@ from moomoo_bot import orchestrator
 from moomoo_bot.orchestrator import cycle as orchestrator_cycle
 from moomoo_bot.config import Settings
 from moomoo_bot.paper import PaperPlan
-from moomoo_bot.state import EquitySnapshot, OrderRecord, PersistentRiskState, StateStore
+from moomoo_bot.state import (
+    EquitySnapshot,
+    OrderRecord,
+    PersistentRiskState,
+    StateStore,
+)
 from moomoo_bot.strategy.base import TradeDecision
 
 
@@ -148,15 +153,16 @@ def test_run_one_shot_trade_records_orders_and_reconciles_pending_orders() -> No
     )
 
     assert trade_client.get_order_frame_calls == 1
-    assert state_store.order_status_updates == [("pending-1", "filled_all", 2.0)]
-    assert state_store.order_status_update_details == [
-        {
-            "fill_price": 251.25,
-            "broker_accepted_price": 250.0,
-            "fee_amount": 1.75,
-            "filled_at": "2025-01-03T14:30:00+00:00",
-        }
+    assert state_store.order_status_updates == [
+        ("pending-1", "filled_all", 2.0),
+        ("1", "filled", 0.0),
     ]
+    assert state_store.order_status_update_details[0] == {
+        "fill_price": 251.25,
+        "broker_accepted_price": 250.0,
+        "fee_amount": 1.75,
+        "filled_at": "2025-01-03T14:30:00+00:00",
+    }
     assert state_store.recorded_orders[0].order_id == "1"
     assert state_store.recorded_orders[0].symbol == "US.AAPL"
 
@@ -266,9 +272,17 @@ def test_run_one_shot_trade_forwards_explicit_position_cap(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(orchestrator, "build_paper_plan", fake_build_paper_plan)
-    monkeypatch.setattr(orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "render_risk_orders", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "_submit_orders_with_duplicate_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator, "render_risk_orders", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_submit_orders_with_duplicate_guard",
+        lambda *args, **kwargs: None,
+    )
 
     orchestrator.run_one_shot_trade(
         settings=settings,
@@ -288,7 +302,6 @@ def test_run_one_shot_trade_forwards_explicit_position_cap(monkeypatch) -> None:
 
     assert captured["max_position_weight"] == 0.35
     assert captured["fractional_share_precision"] == settings.fractional_share_precision
-
 
 
 def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
@@ -329,7 +342,9 @@ def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
     assert state_store.saved_states == []
 
 
-def test_run_paper_repair_prefers_long_position_side_over_negative_qty(tmp_path) -> None:
+def test_run_paper_repair_prefers_long_position_side_over_negative_qty(
+    tmp_path,
+) -> None:
     settings = Settings(
         symbols="US.AAPL",
         benchmark_symbol="US.VT",
@@ -405,7 +420,9 @@ def test_run_one_shot_trade_routes_zero_buying_power_to_repair(monkeypatch) -> N
     assert captured["clear_local_state"] is True
 
 
-def test_run_one_shot_trade_zero_buying_power_falls_back_to_preview(monkeypatch) -> None:
+def test_run_one_shot_trade_zero_buying_power_falls_back_to_preview(
+    monkeypatch,
+) -> None:
     settings = Settings(
         symbols="US.AAPL",
         benchmark_symbol="US.VT",
@@ -472,9 +489,17 @@ def test_run_one_shot_trade_caps_paper_capital_to_buying_power(monkeypatch) -> N
         )
 
     monkeypatch.setattr(orchestrator, "build_paper_plan", fake_build_paper_plan)
-    monkeypatch.setattr(orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "render_risk_orders", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "_submit_orders_with_duplicate_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator, "render_risk_orders", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_submit_orders_with_duplicate_guard",
+        lambda *args, **kwargs: None,
+    )
 
     orchestrator.run_one_shot_trade(
         settings=settings,
@@ -494,8 +519,9 @@ def test_run_one_shot_trade_caps_paper_capital_to_buying_power(monkeypatch) -> N
     assert captured["capital"] == 200.0
 
 
-
-def test_run_one_shot_trade_halves_position_cap_at_drawdown_tier_one(monkeypatch) -> None:
+def test_run_one_shot_trade_halves_position_cap_at_drawdown_tier_one(
+    monkeypatch,
+) -> None:
     settings = Settings(
         symbols="US.AAPL",
         benchmark_symbol="US.VT",
@@ -537,9 +563,17 @@ def test_run_one_shot_trade_halves_position_cap_at_drawdown_tier_one(monkeypatch
         )
 
     monkeypatch.setattr(orchestrator, "build_paper_plan", fake_build_paper_plan)
-    monkeypatch.setattr(orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "render_risk_orders", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "_submit_orders_with_duplicate_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        orchestrator, "render_paper_trade_plan", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator, "render_risk_orders", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_submit_orders_with_duplicate_guard",
+        lambda *args, **kwargs: None,
+    )
 
     orchestrator.run_one_shot_trade(
         settings=settings,
@@ -816,7 +850,10 @@ def test_run_auto_monitor_cleans_equity_history_and_reconciles_pending_orders() 
     except KeyboardInterrupt:
         pass
 
-    assert state_store.order_status_updates == [("pending-1", "filled_all", 2.0)]
+    assert state_store.order_status_updates == [
+        ("pending-1", "filled_all", 2.0),
+        ("1", "filled", 0.0),
+    ]
     assert state_store.cleanup_calls == [30]
     assert trade_client.get_order_frame_calls == 1
     assert sleep_calls == [1]
@@ -991,6 +1028,7 @@ def test_run_one_shot_trade_closes_owned_clients_when_state_store_init_fails(
 
         def __exit__(self, exc_type, exc_val, exc_tb):
             self.close()
+
     quote_client = TrackingQuoteClient()
     trade_client = TrackingTradeClient()
 
@@ -1025,6 +1063,84 @@ def test_run_one_shot_trade_closes_owned_clients_when_state_store_init_fails(
 
     assert quote_client.close_calls == 1
     assert trade_client.close_calls == 1
+
+
+def test_run_one_shot_trade_uses_orchestrator_monkeypatched_clients(
+    monkeypatch,
+) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "MoomooOpenDClient",
+        lambda host, port: quote_client,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "MoomooPaperTradeClient",
+        lambda host, port, trd_env: trade_client,
+    )
+
+    orchestrator.run_one_shot_trade(
+        settings=settings,
+        trade_env=TrdEnv.SIMULATE,
+        symbols=["US.AAPL"],
+        benchmark_symbol="US.VT",
+        history_days=2200,
+        capital=None,
+        fx_jpy_per_usd=None,
+        minimum_order_value=5.0,
+        state_store=FakeStateStore(),
+    )
+
+    assert quote_client.fetch_price_panel_calls == 1
+    assert trade_client.submit_order_calls == 1
+
+
+def test_run_one_shot_trade_local_sim_preserves_original_exception(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+    )
+    quote_client = FakeQuoteClient()
+    strategy = FakeStrategy()
+    sim_path = tmp_path / "paper-sim-state.json"
+
+    monkeypatch.setattr(orchestrator_cycle, "_LOCAL_SIM_PATH", sim_path)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("price panel failed")
+
+    quote_client.fetch_price_panel = boom
+
+    with pytest.raises(RuntimeError, match="price panel failed"):
+        orchestrator.run_one_shot_trade(
+            settings=settings,
+            trade_env=TrdEnv.SIMULATE,
+            symbols=["US.AAPL"],
+            benchmark_symbol="US.VT",
+            history_days=2200,
+            capital=None,
+            fx_jpy_per_usd=None,
+            minimum_order_value=5.0,
+            quote_client=quote_client,
+            strategy=strategy,
+            state_store=FakeStateStore(),
+            use_local_sim=True,
+        )
 
 
 def test_reconcile_pending_orders_logs_type_error_and_returns_zero(
@@ -1164,7 +1280,9 @@ def test_run_one_shot_trade_local_sim_persists_orders(monkeypatch, tmp_path) -> 
     )
 
     payload = json.loads(sim_path.read_text(encoding="utf-8"))
-    assert payload["positions"].get("US.AAPL", {}).get("quantity") == pytest.approx(947.0)
+    assert payload["positions"].get("US.AAPL", {}).get("quantity") == pytest.approx(
+        947.0
+    )
     assert len(payload["trades"]) == 1
 
 
@@ -1204,7 +1322,9 @@ def test_run_one_shot_trade_local_sim_bootstraps_empty_sim_from_jpy_capital(
     payload = json.loads(sim_path.read_text(encoding="utf-8"))
     assert payload["cash"] == pytest.approx(33.31, abs=0.01)
     assert payload["positions"]["US.AAPL"]["quantity"] == pytest.approx(6.0)
-    assert state_store.recorded_equity[-1]["account_value"] == pytest.approx(666.67, abs=0.01)
+    assert state_store.recorded_equity[-1]["account_value"] == pytest.approx(
+        666.67, abs=0.01
+    )
 
 
 def test_run_one_shot_trade_local_sim_bootstrap_clears_stale_state_db(
@@ -1289,20 +1409,18 @@ class FakeQuoteClient:
         return price_frame, benchmark
 
     def fetch_market_state(self, code_list):
-        return pd.DataFrame({"code": list(code_list), "market_state": ["MORNING"] * len(code_list)})
+        return pd.DataFrame(
+            {"code": list(code_list), "market_state": ["MORNING"] * len(code_list)}
+        )
 
     def fetch_market_snapshot(self, code_list):
         self.fetch_market_snapshot_calls += 1
-        return pd.DataFrame({"code": list(code_list), "last_price": [105.555] * len(code_list)})
+        return pd.DataFrame(
+            {"code": list(code_list), "last_price": [105.555] * len(code_list)}
+        )
 
     def close(self) -> None:
         return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
     def __enter__(self):
         return self
@@ -1321,7 +1439,16 @@ class FakeTradeClient:
     submitted_instructions: list[object] = field(default_factory=list)
     order_frame: pd.DataFrame = field(
         default_factory=lambda: pd.DataFrame(
-            {"order_id": [], "order_status": [], "code": [], "trd_side": [], "qty": [], "price": [], "filled_quantity": [], "remark": []}
+            {
+                "order_id": [],
+                "order_status": [],
+                "code": [],
+                "trd_side": [],
+                "qty": [],
+                "price": [],
+                "filled_quantity": [],
+                "remark": [],
+            }
         )
     )
     position_frame: pd.DataFrame = field(
@@ -1338,8 +1465,11 @@ class FakeTradeClient:
 
     def get_account_value(self):
         return self.account_value
+
     def get_buying_power(self):
-        return self.buying_power if self.buying_power is not None else self.account_value
+        return (
+            self.buying_power if self.buying_power is not None else self.account_value
+        )
 
     def get_matching_active_order(self, instruction, refresh_cache=True):
         return None
@@ -1349,16 +1479,12 @@ class FakeTradeClient:
         self.last_instruction_price = instruction.price
         self.submitted_reasons.append(instruction.reason)
         self.submitted_instructions.append(instruction)
-        return pd.DataFrame({"order_id": [self.submit_order_calls], "order_status": ["FILLED"]})
+        return pd.DataFrame(
+            {"order_id": [self.submit_order_calls], "order_status": ["FILLED"]}
+        )
 
     def close(self) -> None:
         return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
     def __enter__(self):
         return self
@@ -1477,6 +1603,14 @@ class FakeStateStore:
             )
             break
 
+    def update_order_id(self, old_order_id: str, new_order_id: str) -> None:
+        for index, order in enumerate(self.pending_orders):
+            if str(order.order_id) == str(old_order_id):
+                self.pending_orders[index].order_id = new_order_id
+        for index, order in enumerate(self.recorded_orders):
+            if str(order.order_id) == str(old_order_id):
+                self.recorded_orders[index].order_id = new_order_id
+
     def cleanup_old_equity(self, keep_days: int = 365) -> int:
         self.cleanup_calls.append(keep_days)
         return 0
@@ -1490,18 +1624,6 @@ class FakeStateStore:
     def close(self) -> None:
         return None
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
 
 @dataclass
 class FakeStrategy:
@@ -1509,4 +1631,6 @@ class FakeStrategy:
 
     def decide(self, prices, as_of):
         self.decide_calls += 1
-        return TradeDecision(as_of=as_of, target_weights={"US.AAPL": 1.0}, reason="injected-test")
+        return TradeDecision(
+            as_of=as_of, target_weights={"US.AAPL": 1.0}, reason="injected-test"
+        )

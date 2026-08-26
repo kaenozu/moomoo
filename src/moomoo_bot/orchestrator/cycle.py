@@ -25,13 +25,11 @@ from moomoo_bot.cli_helpers import (
 from moomoo_bot.cli_render import (
     console,
     render_order_response,
-    render_paper_plan,
     render_paper_trade_plan,
     render_risk_orders,
 )
 from moomoo_bot.money import convert_capital_to_usd
 from moomoo_bot.paper import (
-    PaperPlan,
     build_paper_rebalance_orders,
 )
 from moomoo_bot.risk import (
@@ -45,7 +43,6 @@ from moomoo_bot.orchestrator.helpers import (
     clear_expired_daily_loss_halt,
     daily_order_cap_reason,
     effective_max_position_weight,
-    is_daily_loss_halt,
     kill_switch_message,
     market_date_for_frame,
     overlay_latest_prices,
@@ -349,16 +346,20 @@ def execute_trading_cycle(
             stack.enter_context(trade_client)
         if owns_state_store:
             state_store = StateStore(
-                db_path=local_sim_state_db_path if use_local_sim else settings.state_db_path,
+                db_path=local_sim_state_db_path
+                if use_local_sim
+                else settings.state_db_path,
                 execution_mode=settings.execution_mode,
             )
             stack.enter_context(state_store)
 
         paper_capital_usd = requested_paper_capital_usd
         buying_power_usd: float | None = None
+        fresh_local_sim = False
 
     if use_local_sim:
         from moomoo_bot.paper_simulator import PaperSimulator
+
         _local_sim = PaperSimulator.load(
             state_path=local_sim_path,
             initial_cash=requested_paper_capital_usd,
@@ -366,6 +367,7 @@ def execute_trading_cycle(
         if capital is not None and not _local_sim.positions and not _local_sim.trades:
             _local_sim.reset(initial_cash=requested_paper_capital_usd)
             _reset_local_sim_state_store(state_store)
+            fresh_local_sim = True
         paper_capital_usd = _local_sim.cash
         buying_power_usd = _local_sim.cash
         submit_orders = False
@@ -380,7 +382,13 @@ def execute_trading_cycle(
     if not use_local_sim and callable(buying_power_getter):
         try:
             buying_power_usd = float(buying_power_getter())
-        except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            TimeoutError,
+            RuntimeError,
+        ) as exc:
             logger.warning("Failed to resolve paper buying power: %s", exc)
             requested_paper_capital_usd *= 0.5
         else:
@@ -398,8 +406,21 @@ def execute_trading_cycle(
 
     try:
         persistent_risk_state = state_store.load_risk_state()
+        if fresh_local_sim:
+            persistent_risk_state.peak_account_value = paper_capital_usd
+            persistent_risk_state.halted = False
+            persistent_risk_state.halted_reason = None
+            persistent_risk_state.drawdown_tier = 0
+            persistent_risk_state.daily_order_count = 0
+            persistent_risk_state.daily_order_date = None
+            persistent_risk_state.last_equity_value = paper_capital_usd
+            persistent_risk_state.rule_violation_count = 0
         risk_state = restore_risk_state(persistent_risk_state)
-        if not use_local_sim and buying_power_usd is not None and buying_power_usd <= 0.0:
+        if (
+            not use_local_sim
+            and buying_power_usd is not None
+            and buying_power_usd <= 0.0
+        ):
             logger.warning(
                 "Paper account has no positive buying power; attempting repair."
             )
@@ -418,7 +439,13 @@ def execute_trading_cycle(
             if callable(buying_power_getter):
                 try:
                     refreshed_buying_power_usd = float(buying_power_getter())
-                except (ValueError, TypeError, ConnectionError, TimeoutError, RuntimeError) as exc:
+                except (
+                    ValueError,
+                    TypeError,
+                    ConnectionError,
+                    TimeoutError,
+                    RuntimeError,
+                ) as exc:
                     logger.warning(
                         "Failed to refresh paper buying power after repair: %s", exc
                     )
@@ -665,7 +692,9 @@ def execute_trading_cycle(
             )
         elif not use_local_sim:
             all_cycle_orders = list(risk_orders) + list(instructions)
-            _sync_orders_to_local_simulator(all_cycle_orders, latest_prices, local_sim_path)
+            _sync_orders_to_local_simulator(
+                all_cycle_orders, latest_prices, local_sim_path
+            )
 
         return True
 

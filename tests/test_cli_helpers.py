@@ -6,7 +6,7 @@ import pandas as pd
 from moomoo import TrdSide
 
 from moomoo_bot.cli_helpers import submit_orders_with_duplicate_guard
-from moomoo_bot.exceptions import OrderRejectedError
+from moomoo_bot.exceptions import OrderRejectedError, OrderTimeoutError
 from moomoo_bot.paper import PaperOrderInstruction
 from moomoo_bot.state import OrderRecord, StateStore
 
@@ -35,6 +35,21 @@ class RejectedTradeClient:
     def submit_order(self, instruction):
         self.submit_calls += 1
         raise OrderRejectedError(self.message)
+
+
+class TimeoutTradeClient:
+    def __init__(self, matching_order: dict[str, object] | None) -> None:
+        self.matching_order = matching_order
+        self.submit_calls = 0
+        self.return_match = False
+
+    def get_matching_active_order(self, instruction, refresh_cache: bool = True):
+        return self.matching_order if self.return_match else None
+
+    def submit_order(self, instruction):
+        self.submit_calls += 1
+        self.return_match = True
+        raise OrderTimeoutError("request timed out")
 
 
 def test_submit_orders_records_immediate_fill_into_execution_ledger(tmp_path) -> None:
@@ -155,7 +170,9 @@ def test_submit_orders_does_not_skip_stale_pending_state_order(tmp_path) -> None
     )
 
     try:
-        stale_submitted_at = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        stale_submitted_at = (
+            datetime.now(timezone.utc) - timedelta(minutes=30)
+        ).isoformat()
         state_store.record_order(
             OrderRecord(
                 order_id="stale-pending-1",
@@ -242,5 +259,36 @@ def test_submit_orders_treats_order_rejected_error_as_skippable(tmp_path) -> Non
 
         assert submitted_count == 0
         assert trade_client.submit_calls == 1
+    finally:
+        state_store.close()
+
+
+def test_submit_orders_treats_timeout_with_existing_order_as_success(tmp_path) -> None:
+    state_store = StateStore(db_path=tmp_path / "state.db")
+    trade_client = TimeoutTradeClient(
+        {"order_id": "timeout-1", "order_status": "SUBMITTED"}
+    )
+    instruction = PaperOrderInstruction(
+        symbol="US.AVGO",
+        side=TrdSide.BUY,
+        quantity=4010.0,
+        price=422.76,
+        reason="paper_repair:cover_short:US.AVGO",
+    )
+
+    try:
+        submitted_count = submit_orders_with_duplicate_guard(
+            trade_client,
+            [instruction],
+            "paper",
+            lambda *_args, **_kwargs: None,
+            state_store=state_store,
+        )
+
+        assert submitted_count == 1
+        assert trade_client.submit_calls == 1
+        recent_order = state_store.load_recent_orders(limit=1)[0]
+        assert recent_order.order_id == "timeout-1"
+        assert recent_order.status == "submitted"
     finally:
         state_store.close()
