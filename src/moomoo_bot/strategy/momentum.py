@@ -215,6 +215,7 @@ class MonthlyMomentumRotationStrategy:
             as_of=as_of, target_weights=self._current_weights, reason=reason
         )
 
+
 class CoreSatelliteStrategy:
     """Blend an active strategy sleeve with a benchmark core sleeve."""
 
@@ -264,7 +265,6 @@ class CoreSatelliteStrategy:
             target_weights=active_weights,
             reason=f"{decision.reason}:core_satellite={self.satellite_weight:.0%}/{(1.0 - self.satellite_weight):.0%}",
         )
-
 
 
 class DynamicCoreSatelliteStrategy(CoreSatelliteStrategy):

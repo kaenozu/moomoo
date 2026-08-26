@@ -168,7 +168,9 @@ def test_core_satellite_strategy_blends_active_sleeve_with_benchmark() -> None:
     assert active_strategy.reset_calls == 1
 
 
-def test_core_satellite_strategy_delegates_attributes_and_tolerates_missing_reset() -> None:
+def test_core_satellite_strategy_delegates_attributes_and_tolerates_missing_reset() -> (
+    None
+):
     class ActiveStrategy:
         def __init__(self) -> None:
             self.config = {"name": "demo"}
