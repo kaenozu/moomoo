@@ -6,19 +6,50 @@ Related: orchestrator.py, broker modules.
 
 from __future__ import annotations
 
+import ipaddress
+import json
 import logging
 import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-from threading import Lock, Thread
+import socket
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Lock, Thread
 
 
 logger = logging.getLogger(__name__)
 
 # Optional bearer token for health endpoint auth
 _HEALTH_AUTH_TOKEN = os.getenv("MOOMOO_BOT_HEALTH_TOKEN", "")
+
+
+def _host_is_loopback(host: str) -> bool:
+    """Return True only when every resolved bind address is loopback."""
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        return literal.is_loopback
+
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(
+                host,
+                None,
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except socket.gaierror:
+        # An unresolved hostname is not proven local; require authentication.
+        return False
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(address).is_loopback for address in addresses)
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -127,13 +158,14 @@ class HealthCheckServer:
             return
 
         host = os.getenv("MOOMOO_BOT_HEALTH_HOST", "127.0.0.1")
-        if host == "0.0.0.0" and not _HEALTH_AUTH_TOKEN:
+        if not _host_is_loopback(host) and not _HEALTH_AUTH_TOKEN:
             logger.error(
-                "Refusing to bind to 0.0.0.0 without MOOMOO_BOT_HEALTH_TOKEN. "
-                "Set the token or bind to 127.0.0.1 for local-only access."
+                "Refusing to bind health endpoint to non-loopback host %s without "
+                "MOOMOO_BOT_HEALTH_TOKEN.",
+                host,
             )
             raise RuntimeError(
-                "Health check server requires MOOMOO_BOT_HEALTH_TOKEN when binding to all interfaces (0.0.0.0)"
+                "Health check server requires MOOMOO_BOT_HEALTH_TOKEN for every non-loopback bind"
             )
 
         def handler(*args, **kwargs):
