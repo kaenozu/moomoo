@@ -122,8 +122,10 @@ jobs:
           cycle_path.write_text(cycle, encoding="utf-8")
 
           Path(".github/workflows/repair-high-order-safety.yml").unlink()
-      - name: Install package
-        run: python -m pip install -e .[dev]
+      - name: Install package and Ruff
+        run: |
+          python -m pip install -e .[dev]
+          python -m pip install ruff
       - name: Validate changed safety surface
         run: |
           ruff check src/moomoo_bot/orchestrator/risk_checks.py src/moomoo_bot/orchestrator/cycle.py src/moomoo_bot/broker/paper.py tests/test_review_high_order_safety.py tests/test_paper.py
