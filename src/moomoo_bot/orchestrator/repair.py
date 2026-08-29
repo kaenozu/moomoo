@@ -178,6 +178,14 @@ def run_paper_repair(
             execution_mode=settings.execution_mode,
         )
 
+    # Repair submits liquidation orders.  Never allow an injected live client
+    # to reach the order path, even if the caller accidentally routes it here.
+    if getattr(trade_client, "trd_env", None) != TrdEnv.SIMULATE:
+        message = "Paper repair requires a SIMULATE trade client; refusing live client."
+        logger.error(message)
+        console.print(message)
+        return False
+
     try:
         position_frame = trade_client.get_position_frame()
         signed_positions = signed_position_quantities(position_frame)
