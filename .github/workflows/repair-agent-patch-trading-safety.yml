@@ -1,0 +1,43 @@
+name: Repair trading safety harness
+
+on:
+  push:
+    branches: [fix/issues-14-17-trading-safety]
+    paths: ['.github/workflows/repair-agent-patch-trading-safety.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/issues-14-17-trading-safety
+      - name: Repair embedded test imports and enum value
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('.github/workflows/agent-patch-trading-safety.yml')
+          text = p.read_text(encoding='utf-8')
+          changes = [
+            ('import pandas as pd\\nimport pytest\\nfrom moomoo import RET_OK, TrdEnv\\n', 'import pytest\\nfrom moomoo import TrdEnv, TrdSide\\n'),
+            ('side="BUY", quantity=1, price=100.0', 'side=TrdSide.BUY, quantity=1, price=100.0'),
+          ]
+          for old, new in changes:
+            if text.count(old) != 1:
+              raise SystemExit(f'expected one match, got {text.count(old)} for {old!r}')
+            text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+      - name: Commit repaired harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/repair-agent-patch-trading-safety.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/agent-patch-trading-safety.yml .github/workflows/repair-agent-patch-trading-safety.yml
+          git diff --cached --check
+          git commit -m 'chore: repair trading safety validation harness'
+          git push origin HEAD:fix/issues-14-17-trading-safety
