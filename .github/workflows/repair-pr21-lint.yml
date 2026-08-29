@@ -1,0 +1,44 @@
+name: Repair PR21 lint
+
+on:
+  push:
+    branches: [agent/fix-high-order-safety-15-17]
+    paths: [.github/workflows/repair-pr21-lint.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-high-order-safety-15-17
+      - name: Remove obsolete import
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('src/moomoo_bot/orchestrator/risk_checks.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'from moomoo_bot.cli_render import console, render_paper_plan, render_risk_orders\n'
+          new = 'from moomoo_bot.cli_render import console, render_paper_plan\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'import match count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          Path('.github/workflows/repair-pr21-lint.yml').unlink()
+      - name: Validate
+        run: |
+          python -m pip install ruff
+          ruff check src/
+          ruff format --check src/
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/moomoo_bot/orchestrator/risk_checks.py .github/workflows/repair-pr21-lint.yml
+          git diff --cached --check
+          git commit -m 'fix: remove obsolete risk render import'
+          git push origin HEAD:agent/fix-high-order-safety-15-17
