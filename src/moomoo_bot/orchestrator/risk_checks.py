@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from moomoo_bot.cli_render import console, render_paper_plan, render_risk_orders
+from moomoo_bot.cli_render import console, render_paper_plan
 from moomoo_bot.notify import (
     notify_daily_limit as _notify_daily_limit,
     notify_risk_stop as _notify_risk_stop,
