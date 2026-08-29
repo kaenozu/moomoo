@@ -1,0 +1,87 @@
+name: Agent patch trading safety
+
+on:
+  push:
+    branches: [fix/issues-14-17-trading-safety]
+    paths: ['.github/workflows/agent-patch-trading-safety.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/issues-14-17-trading-safety
+      - name: Apply exact safety patches
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, got {count}: {old[:100]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'src/moomoo_bot/orchestrator/cycle.py',
+              '''    from contextlib import ExitStack\n\n    owns_quote_client = quote_client is None\n    # In local-sim mode we never create a real trade client.\n    owns_trade_client = (not use_local_sim) and (trade_client is None)\n    owns_state_store = state_store is None\n\n    with ExitStack() as stack:\n        if owns_quote_client:\n            quote_client = MoomooOpenDClient(\n                host=settings.opend_host, port=settings.opend_port\n            )\n            stack.enter_context(quote_client)\n        if owns_trade_client:\n            trade_client = MoomooPaperTradeClient(\n                host=settings.opend_host, port=settings.opend_port, trd_env=trade_env\n            )\n            stack.enter_context(trade_client)\n        if owns_state_store:\n            state_store = StateStore(\n                db_path=local_sim_state_db_path\n                if use_local_sim\n                else settings.state_db_path,\n                execution_mode=settings.execution_mode,\n            )\n            stack.enter_context(state_store)\n\n        paper_capital_usd = requested_paper_capital_usd\n        buying_power_usd: float | None = None\n        fresh_local_sim = False\n''',
+              '''    owns_quote_client = quote_client is None\n    # In local-sim mode we never create a real trade client.\n    owns_trade_client = (not use_local_sim) and (trade_client is None)\n    owns_state_store = state_store is None\n\n    if owns_quote_client:\n        quote_client = MoomooOpenDClient(\n            host=settings.opend_host, port=settings.opend_port\n        )\n    if owns_trade_client:\n        trade_client = MoomooPaperTradeClient(\n            host=settings.opend_host, port=settings.opend_port, trd_env=trade_env\n        )\n    if owns_state_store:\n        state_store = StateStore(\n            db_path=local_sim_state_db_path\n            if use_local_sim\n            else settings.state_db_path,\n            execution_mode=settings.execution_mode,\n        )\n\n    paper_capital_usd = requested_paper_capital_usd\n    buying_power_usd: float | None = None\n    fresh_local_sim = False\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/orchestrator/cycle.py',
+              '''        if (\n            not use_local_sim\n            and buying_power_usd is not None\n            and buying_power_usd <= 0.0\n        ):\n''',
+              '''        if (\n            not use_local_sim\n            and buying_power_usd is not None\n            and buying_power_usd <= 0.0\n            and getattr(trade_client, "trd_env", None) == TrdEnv.SIMULATE\n        ):\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/orchestrator/repair.py',
+              '''    if owns_state_store:\n        state_store = StateStore(\n            db_path=settings.state_db_path,\n            execution_mode=settings.execution_mode,\n        )\n\n    try:\n''',
+              '''    if owns_state_store:\n        state_store = StateStore(\n            db_path=settings.state_db_path,\n            execution_mode=settings.execution_mode,\n        )\n\n    if getattr(trade_client, "trd_env", None) != TrdEnv.SIMULATE:\n        raise RuntimeError("Paper repair requires a SIMULATE trade client")\n\n    try:\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/orchestrator/risk_checks.py',
+              '''    _halt_and_liquidate(\n        reason=shock_reason,\n''',
+              '''    orders = _halt_and_liquidate(\n        reason=shock_reason,\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/orchestrator/risk_checks.py',
+              '''    logger.warning("Risk stop: %s", shock_reason)\n    console.print(f"Risk stop: {shock_reason}")\n    render_risk_orders([], current_positions, "Risk Stop Orders")\n\n    peak = risk_state.peak_account_value or account_value\n''',
+              '''    logger.warning("Risk stop: %s", shock_reason)\n    console.print(f"Risk stop: {shock_reason}")\n    from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation\n\n    render_and_submit_risk_liquidation(\n        trade_client,\n        orders,\n        current_positions,\n        mode_label,\n        submit_orders=submit_orders,\n        state_store=state_store,\n    )\n\n    peak = risk_state.peak_account_value or account_value\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/broker/paper.py',
+              '''from moomoo_bot.exceptions import (\n    BrokerConnectionError,\n    DataError,\n    OrderRejectedError,\n    OrderTimeoutError,\n)\n''',
+              '''from moomoo_bot.exceptions import (\n    BrokerConnectionError,\n    DataError,\n    OrderRejectedError,\n)\n''',
+          )
+          replace_once(
+              'src/moomoo_bot/broker/paper.py',
+              'from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS\n',
+              '',
+          )
+          replace_once(
+              'src/moomoo_bot/broker/paper.py',
+              '''    def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:\n        """Submit an order with retry logic for transient failures."""\n        return self._submit_order_with_retry(instruction)\n\n    @with_retries(\n        max_retries=_START_MAX_RETRIES,\n        base_delay=_START_RETRY_DELAY_SECONDS,\n        exceptions=TRANSIENT_EXCEPTIONS,\n        raise_on_failure=OrderTimeoutError,\n    )\n    def _submit_order_with_retry(\n        self, instruction: PaperOrderInstruction\n    ) -> pd.DataFrame:\n        """Internal retry-wrapped order submission."""\n''',
+              '''    def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:\n        """Submit exactly once; ambiguous transport failures must be reconciled by callers."""\n''',
+          )
+          test = Path('tests/test_review_trading_safety.py')
+          test.write_text('''from __future__ import annotations\n\nfrom pathlib import Path\n\nimport pandas as pd\nimport pytest\nfrom moomoo import RET_OK, TrdEnv\n\nfrom moomoo_bot.broker.paper import MoomooPaperTradeClient\nfrom moomoo_bot.paper import PaperOrderInstruction\n\n\nclass AmbiguousTimeoutContext:\n    def __init__(self) -> None:\n        self.calls = 0\n\n    def start(self) -> None:\n        return None\n\n    def close(self) -> None:\n        return None\n\n    def place_order(self, **kwargs):\n        self.calls += 1\n        raise TimeoutError("accepted but response lost")\n\n\ndef test_place_order_is_not_retried_after_ambiguous_timeout() -> None:\n    ctx = AmbiguousTimeoutContext()\n    client = MoomooPaperTradeClient(trade_context=ctx, trd_env=TrdEnv.SIMULATE)\n    instruction = PaperOrderInstruction(symbol="US.AAPL", side="BUY", quantity=1, price=100.0, reason="test")\n\n    with pytest.raises(TimeoutError):\n        client.submit_order(instruction)\n\n    assert ctx.calls == 1\n\n\ndef test_cycle_owned_clients_are_not_exitstack_closed_before_main_try() -> None:\n    source = Path("src/moomoo_bot/orchestrator/cycle.py").read_text(encoding="utf-8")\n    assert "with ExitStack() as stack:" not in source\n    assert "if owns_trade_client:\\n            trade_client.close()" in source\n    assert "getattr(trade_client, \\"trd_env\\", None) == TrdEnv.SIMULATE" in source\n\n\ndef test_paper_repair_rejects_real_trade_client_by_contract() -> None:\n    source = Path("src/moomoo_bot/orchestrator/repair.py").read_text(encoding="utf-8")\n    guard = 'getattr(trade_client, "trd_env", None) != TrdEnv.SIMULATE'\n    assert guard in source\n    assert source.index(guard) < source.index("position_frame = trade_client.get_position_frame()")\n\n\ndef test_market_shock_submits_built_liquidation_orders() -> None:\n    source = Path("src/moomoo_bot/orchestrator/risk_checks.py").read_text(encoding="utf-8")\n    start = source.index("def check_market_shock(")\n    end = source.index("def check_daily_loss_limit(", start)\n    block = source[start:end]\n    assert "orders = _halt_and_liquidate(" in block\n    assert "render_and_submit_risk_liquidation(" in block\n    assert "render_risk_orders([], current_positions" not in block\n''', encoding='utf-8')
+      - name: Validate and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/agent-patch-trading-safety.yml
+          python -m pip install -e '.[dev]'
+          ruff check src tests
+          pyright
+          pytest -q
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests .github/workflows/agent-patch-trading-safety.yml
+          git commit -m 'fix: close critical trading safety gaps'
+          git push origin HEAD:fix/issues-14-17-trading-safety
