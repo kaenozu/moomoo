@@ -8,8 +8,8 @@ import pytest
 from moomoo import Session, TrdSide
 
 from moomoo_bot.broker.paper import MoomooPaperTradeClient
-from moomoo_bot.paper import build_paper_plan, build_paper_rebalance_orders
 from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.paper import build_paper_plan, build_paper_rebalance_orders
 from moomoo_bot.strategy.base import TradeDecision
 
 
@@ -364,9 +364,7 @@ class FakeTradeContext:
 # --- Domain exception tests for MoomooPaperTradeClient ---
 
 
-def test_paper_trade_client_raises_broker_connection_error_when_context_is_none() -> (
-    None
-):
+def test_paper_trade_client_raises_broker_connection_error_when_context_is_none() -> None:
     from moomoo_bot.exceptions import BrokerConnectionError
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
@@ -390,7 +388,6 @@ def test_paper_trade_client_raises_broker_connection_error_when_context_is_none(
 
 def test_paper_trade_client_raises_broker_connection_error_on_api_failure() -> None:
     from moomoo_bot.exceptions import BrokerConnectionError
-    from unittest.mock import MagicMock
 
     mock_ctx = MagicMock()
     mock_ctx.accinfo_query.return_value = (1, "connection refused")
@@ -510,20 +507,17 @@ def test_paper_trade_client_buying_power_prefers_available_funds() -> None:
     assert client.get_buying_power() == 200.0
 
 
-def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None:
+def test_submit_order_does_not_retry_ambiguous_transport_failure() -> None:
     from moomoo import TrdEnv, TrdSide
 
-    from moomoo_bot import retry as retry_module
     from moomoo_bot.exceptions import OrderTimeoutError
 
     mock_ctx = MagicMock()
-    mock_ctx.place_order.side_effect = RuntimeError("temporary opend failure")
+    mock_ctx.place_order.side_effect = TimeoutError("broker accepted but response was lost")
 
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
-
-    monkeypatch.setattr(retry_module.time, "sleep", lambda _: None)
 
     instruction = PaperOrderInstruction(
         symbol="US.AAPL",
@@ -533,19 +527,15 @@ def test_submit_order_raises_timeout_after_retry_exhaustion(monkeypatch) -> None
         reason="monthly_top_momentum:US.AAPL",
     )
 
-    with pytest.raises(
-        OrderTimeoutError,
-        match="_submit_order_with_retry failed after 3 attempts",
-    ):
+    with pytest.raises(OrderTimeoutError, match="outcome is uncertain"):
         client.submit_order(instruction)
 
-    assert mock_ctx.place_order.call_count == 3
+    assert mock_ctx.place_order.call_count == 1
 
 
-def test_submit_order_does_not_retry_rejected_orders(monkeypatch) -> None:
+def test_submit_order_does_not_retry_rejected_orders() -> None:
     from moomoo import TrdEnv, TrdSide
 
-    from moomoo_bot import retry as retry_module
     from moomoo_bot.exceptions import OrderRejectedError
 
     mock_ctx = MagicMock()
@@ -554,8 +544,6 @@ def test_submit_order_does_not_retry_rejected_orders(monkeypatch) -> None:
     client = MoomooPaperTradeClient.__new__(MoomooPaperTradeClient)
     client.trade_context = mock_ctx
     client.trd_env = TrdEnv.SIMULATE
-
-    monkeypatch.setattr(retry_module.time, "sleep", lambda _: None)
 
     instruction = PaperOrderInstruction(
         symbol="US.AAPL",
