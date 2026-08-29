@@ -20,101 +20,108 @@ jobs:
         run: |
           from pathlib import Path
 
-          risk_path = Path('src/moomoo_bot/orchestrator/risk_checks.py')
-          risk = risk_path.read_text(encoding='utf-8')
-          old = '    _halt_and_liquidate(\n        reason=shock_reason,\n'
-          new = '    orders = _halt_and_liquidate(\n        reason=shock_reason,\n'
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
+          risk_path = Path("src/moomoo_bot/orchestrator/risk_checks.py")
+          risk = risk_path.read_text(encoding="utf-8")
+          old = "    _halt_and_liquidate(\n        reason=shock_reason,\n"
+          new = "    orders = _halt_and_liquidate(\n        reason=shock_reason,\n"
           if risk.count(old) != 1:
-              raise SystemExit(f'market-shock liquidation match count={risk.count(old)}')
+              raise SystemExit(f"market-shock liquidation match count={risk.count(old)}")
           risk = risk.replace(old, new, 1)
-          old = '    render_risk_orders([], current_positions, "Risk Stop Orders")\n'
-          new = '''    from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
-
-    render_and_submit_risk_liquidation(
-        trade_client,
-        orders,
-        current_positions,
-        mode_label,
-        submit_orders=submit_orders,
-        state_store=state_store,
-    )
-'''
+          old = "    render_risk_orders([], current_positions, \"Risk Stop Orders\")\n"
+          new = block([
+              "    from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation",
+              "",
+              "    render_and_submit_risk_liquidation(",
+              "        trade_client,",
+              "        orders,",
+              "        current_positions,",
+              "        mode_label,",
+              "        submit_orders=submit_orders,",
+              "        state_store=state_store,",
+              "    )",
+          ])
           if risk.count(old) != 1:
-              raise SystemExit(f'empty risk render match count={risk.count(old)}')
+              raise SystemExit(f"empty risk render match count={risk.count(old)}")
           risk = risk.replace(old, new, 1)
-          risk_path.write_text(risk, encoding='utf-8')
+          risk_path.write_text(risk, encoding="utf-8")
 
-          cycle_path = Path('src/moomoo_bot/orchestrator/cycle.py')
-          cycle = cycle_path.read_text(encoding='utf-8')
-          old = '''    with ExitStack() as stack:
-        if owns_quote_client:
-            quote_client = MoomooOpenDClient(
-                host=settings.opend_host, port=settings.opend_port
-            )
-            stack.enter_context(quote_client)
-        if owns_trade_client:
-            trade_client = MoomooPaperTradeClient(
-                host=settings.opend_host, port=settings.opend_port, trd_env=trade_env
-            )
-            stack.enter_context(trade_client)
-        if owns_state_store:
-            state_store = StateStore(
-                db_path=local_sim_state_db_path
-                if use_local_sim
-                else settings.state_db_path,
-                execution_mode=settings.execution_mode,
-            )
-            stack.enter_context(state_store)
-
-        paper_capital_usd = requested_paper_capital_usd
-        buying_power_usd: float | None = None
-        fresh_local_sim = False
-'''
-          new = '''    stack = ExitStack()
-    try:
-        if owns_quote_client:
-            quote_client = MoomooOpenDClient(
-                host=settings.opend_host, port=settings.opend_port
-            )
-            stack.enter_context(quote_client)
-        if owns_trade_client:
-            trade_client = MoomooPaperTradeClient(
-                host=settings.opend_host, port=settings.opend_port, trd_env=trade_env
-            )
-            stack.enter_context(trade_client)
-        if owns_state_store:
-            state_store = StateStore(
-                db_path=local_sim_state_db_path
-                if use_local_sim
-                else settings.state_db_path,
-                execution_mode=settings.execution_mode,
-            )
-            stack.enter_context(state_store)
-
-        paper_capital_usd = requested_paper_capital_usd
-        buying_power_usd: float | None = None
-        fresh_local_sim = False
-    except Exception:
-        stack.close()
-        raise
-'''
+          cycle_path = Path("src/moomoo_bot/orchestrator/cycle.py")
+          cycle = cycle_path.read_text(encoding="utf-8")
+          old = block([
+              "    with ExitStack() as stack:",
+              "        if owns_quote_client:",
+              "            quote_client = MoomooOpenDClient(",
+              "                host=settings.opend_host, port=settings.opend_port",
+              "            )",
+              "            stack.enter_context(quote_client)",
+              "        if owns_trade_client:",
+              "            trade_client = MoomooPaperTradeClient(",
+              "                host=settings.opend_host, port=settings.opend_port, trd_env=trade_env",
+              "            )",
+              "            stack.enter_context(trade_client)",
+              "        if owns_state_store:",
+              "            state_store = StateStore(",
+              "                db_path=local_sim_state_db_path",
+              "                if use_local_sim",
+              "                else settings.state_db_path,",
+              "                execution_mode=settings.execution_mode,",
+              "            )",
+              "            stack.enter_context(state_store)",
+              "",
+              "        paper_capital_usd = requested_paper_capital_usd",
+              "        buying_power_usd: float | None = None",
+              "        fresh_local_sim = False",
+          ])
+          new = block([
+              "    stack = ExitStack()",
+              "    try:",
+              "        if owns_quote_client:",
+              "            quote_client = MoomooOpenDClient(",
+              "                host=settings.opend_host, port=settings.opend_port",
+              "            )",
+              "            stack.enter_context(quote_client)",
+              "        if owns_trade_client:",
+              "            trade_client = MoomooPaperTradeClient(",
+              "                host=settings.opend_host, port=settings.opend_port, trd_env=trade_env",
+              "            )",
+              "            stack.enter_context(trade_client)",
+              "        if owns_state_store:",
+              "            state_store = StateStore(",
+              "                db_path=local_sim_state_db_path",
+              "                if use_local_sim",
+              "                else settings.state_db_path,",
+              "                execution_mode=settings.execution_mode,",
+              "            )",
+              "            stack.enter_context(state_store)",
+              "",
+              "        paper_capital_usd = requested_paper_capital_usd",
+              "        buying_power_usd: float | None = None",
+              "        fresh_local_sim = False",
+              "    except Exception:",
+              "        stack.close()",
+              "        raise",
+          ])
           if cycle.count(old) != 1:
-              raise SystemExit(f'ExitStack acquisition block match count={cycle.count(old)}')
+              raise SystemExit(f"ExitStack acquisition block match count={cycle.count(old)}")
           cycle = cycle.replace(old, new, 1)
-          old = '''        if owns_state_store:
-            state_store.close()
-        if owns_trade_client:
-            trade_client.close()
-        if owns_quote_client:
-            quote_client.close()
-'''
-          new = '        stack.close()\n'
+          old = block([
+              "        if owns_state_store:",
+              "            state_store.close()",
+              "        if owns_trade_client:",
+              "            trade_client.close()",
+              "        if owns_quote_client:",
+              "            quote_client.close()",
+          ])
+          new = "        stack.close()\n"
           if cycle.count(old) != 1:
-              raise SystemExit(f'owned close block match count={cycle.count(old)}')
+              raise SystemExit(f"owned close block match count={cycle.count(old)}")
           cycle = cycle.replace(old, new, 1)
-          cycle_path.write_text(cycle, encoding='utf-8')
+          cycle_path.write_text(cycle, encoding="utf-8")
 
-          Path('.github/workflows/repair-high-order-safety.yml').unlink()
+          Path(".github/workflows/repair-high-order-safety.yml").unlink()
       - name: Install package
         run: python -m pip install -e .[dev]
       - name: Validate changed safety surface
