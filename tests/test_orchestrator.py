@@ -342,6 +342,31 @@ def test_run_paper_repair_covers_short_positions(monkeypatch, tmp_path) -> None:
     assert state_store.saved_states == []
 
 
+def test_run_paper_repair_rejects_real_trade_client(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        symbols="US.AAPL",
+        benchmark_symbol="US.VT",
+        execution_mode="paper",
+        capital_currency="USD",
+        initial_capital=100_000.0,
+        state_db_path=tmp_path / "paper-state.db",
+    )
+    quote_client = FakeQuoteClient()
+    trade_client = FakeTradeClient(trd_env=TrdEnv.REAL)
+
+    result = orchestrator.run_paper_repair(
+        settings=settings,
+        benchmark_symbol="US.VT",
+        quote_client=quote_client,
+        trade_client=trade_client,
+        state_store=FakeStateStore(),
+        clear_local_state=False,
+    )
+
+    assert result is False
+    assert trade_client.submit_order_calls == 0
+
+
 def test_run_paper_repair_prefers_long_position_side_over_negative_qty(
     tmp_path,
 ) -> None:
@@ -1431,6 +1456,7 @@ class FakeQuoteClient:
 
 @dataclass
 class FakeTradeClient:
+    trd_env: TrdEnv = TrdEnv.SIMULATE
     submit_order_calls: int = 0
     get_order_frame_calls: int = 0
     last_instruction_price: float | None = None
