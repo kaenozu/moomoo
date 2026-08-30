@@ -28,13 +28,13 @@ from moomoo_bot.exceptions import (
     OrderTimeoutError,
 )
 from moomoo_bot.paper import PaperOrderInstruction
+from moomoo_bot.retry import TRANSIENT_EXCEPTIONS
 from moomoo_bot.row_utils import position_quantities_from_frame
-from moomoo_bot.retry import with_retries, TRANSIENT_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 
-# ``with_retries`` counts retries after the initial call. Keep three total
-# broker attempts, matching the previous paper-trading behavior.
+# Context start is idempotent and can be retried. Order placement below is
+# deliberately single-attempt because broker acceptance can precede a timeout.
 _START_MAX_RETRIES = 2
 _START_RETRY_DELAY_SECONDS = 2.0
 
@@ -193,35 +193,36 @@ class MoomooPaperTradeClient:
         return None
 
     def submit_order(self, instruction: PaperOrderInstruction) -> pd.DataFrame:
-        """Submit an order with retry logic for transient failures."""
-        return self._submit_order_with_retry(instruction)
+        """Submit exactly once; ambiguous transport failures require reconciliation.
 
-    @with_retries(
-        max_retries=_START_MAX_RETRIES,
-        base_delay=_START_RETRY_DELAY_SECONDS,
-        exceptions=TRANSIENT_EXCEPTIONS,
-        raise_on_failure=OrderTimeoutError,
-    )
-    def _submit_order_with_retry(
-        self, instruction: PaperOrderInstruction
-    ) -> pd.DataFrame:
-        """Internal retry-wrapped order submission."""
+        ``place_order`` is non-idempotent. If the broker accepts the order and the
+        response is then lost, retrying the same call can create a second live
+        order. The higher-level order submission service handles
+        ``OrderTimeoutError`` by querying active broker orders before allowing a
+        later cycle to try again.
+        """
         if self.trade_context is None:
             raise BrokerConnectionError("trade context is not initialized")
 
         remark = (instruction.reason or "")[:64]
+        try:
+            ret, data = self.trade_context.place_order(
+                price=instruction.price,
+                qty=instruction.quantity,
+                code=instruction.symbol,
+                trd_side=instruction.side,
+                order_type=OrderType.NORMAL,
+                trd_env=self.trd_env,
+                remark=remark,
+                session=instruction.session or Session.NONE,
+                fill_outside_rth=instruction.fill_outside_rth,
+            )
+        except TRANSIENT_EXCEPTIONS as exc:
+            raise OrderTimeoutError(
+                "Order submission outcome is uncertain after a transport failure; "
+                "reconcile broker order state before retrying"
+            ) from exc
 
-        ret, data = self.trade_context.place_order(
-            price=instruction.price,
-            qty=instruction.quantity,
-            code=instruction.symbol,
-            trd_side=instruction.side,
-            order_type=OrderType.NORMAL,
-            trd_env=self.trd_env,
-            remark=remark,
-            session=instruction.session or Session.NONE,
-            fill_outside_rth=instruction.fill_outside_rth,
-        )
         if ret != RET_OK:
             mode_name = "live" if self.trd_env == TrdEnv.REAL else "paper"
             raise OrderRejectedError(

@@ -333,7 +333,8 @@ def execute_trading_cycle(
     owns_trade_client = (not use_local_sim) and (trade_client is None)
     owns_state_store = state_store is None
 
-    with ExitStack() as stack:
+    stack = ExitStack()
+    try:
         if owns_quote_client:
             quote_client = MoomooOpenDClient(
                 host=settings.opend_host, port=settings.opend_port
@@ -356,6 +357,9 @@ def execute_trading_cycle(
         paper_capital_usd = requested_paper_capital_usd
         buying_power_usd: float | None = None
         fresh_local_sim = False
+    except Exception:
+        stack.close()
+        raise
 
     if use_local_sim:
         from moomoo_bot.paper_simulator import PaperSimulator
@@ -704,9 +708,4 @@ def execute_trading_cycle(
                 _local_sim.save()
             except Exception as exc:
                 logger.warning("Failed to save local simulator state: %s", exc)
-        if owns_state_store:
-            state_store.close()
-        if owns_trade_client:
-            trade_client.close()
-        if owns_quote_client:
-            quote_client.close()
+        stack.close()

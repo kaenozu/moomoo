@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from moomoo_bot.cli_render import console, render_paper_plan, render_risk_orders
+from moomoo_bot.cli_render import console, render_paper_plan
 from moomoo_bot.notify import (
     notify_daily_limit as _notify_daily_limit,
     notify_risk_stop as _notify_risk_stop,
@@ -153,7 +153,7 @@ def check_market_shock(
     if not shock_reason:
         return None
 
-    _halt_and_liquidate(
+    orders = _halt_and_liquidate(
         reason=shock_reason,
         set_halted=False,
         risk_state=risk_state,
@@ -171,7 +171,16 @@ def check_market_shock(
     )
     logger.warning("Risk stop: %s", shock_reason)
     console.print(f"Risk stop: {shock_reason}")
-    render_risk_orders([], current_positions, "Risk Stop Orders")
+    from moomoo_bot.orchestrator.cycle import render_and_submit_risk_liquidation
+
+    render_and_submit_risk_liquidation(
+        trade_client,
+        orders,
+        current_positions,
+        mode_label,
+        submit_orders=submit_orders,
+        state_store=state_store,
+    )
 
     peak = risk_state.peak_account_value or account_value
     _notify_risk_stop(
